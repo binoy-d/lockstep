@@ -159,8 +159,6 @@ export class OverlayUI {
 
   private readonly showFpsToggle: HTMLInputElement;
 
-  private readonly mobileFlipToggle: HTMLInputElement;
-
   private readonly panels: Record<string, HTMLElement>;
 
   private readonly introPanel: HTMLElement;
@@ -189,6 +187,10 @@ export class OverlayUI {
 
   private readonly accountLogoutButton: HTMLButtonElement;
 
+  private readonly introAccountPanel: HTMLElement;
+
+  private readonly introAccountButton: HTMLButtonElement;
+
   private readonly introSettingsPanel: HTMLElement;
 
   private readonly introSettingsButton: HTMLButtonElement;
@@ -204,8 +206,6 @@ export class OverlayUI {
   private readonly introCameraSwayToggle: HTMLInputElement;
 
   private readonly introShowFpsToggle: HTMLInputElement;
-
-  private readonly introMobileFlipToggle: HTMLInputElement;
 
   private readonly introCinematic: LockstepIntroCinematic;
 
@@ -244,8 +244,6 @@ export class OverlayUI {
   private readonly pauseTestBackButton: HTMLButtonElement;
 
   private readonly mobileSwipeHint: HTMLElement;
-
-  private readonly mobileFlipFab: HTMLButtonElement;
 
   private readonly mobileOnlySettings: HTMLElement[];
 
@@ -313,6 +311,8 @@ export class OverlayUI {
     this.accountLoginButton = asElement<HTMLButtonElement>(this.root, '#btn-account-login');
     this.accountRegisterButton = asElement<HTMLButtonElement>(this.root, '#btn-account-register');
     this.accountLogoutButton = asElement<HTMLButtonElement>(this.root, '#btn-account-logout');
+    this.introAccountPanel = asElement<HTMLElement>(this.root, '#intro-account-panel');
+    this.introAccountButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-account-toggle');
     this.introSettingsPanel = asElement<HTMLElement>(this.root, '#intro-settings-panel');
     this.introSettingsButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-settings-toggle');
     this.introSettingsCloseButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-settings-close');
@@ -321,7 +321,6 @@ export class OverlayUI {
     this.introLightingToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-lighting');
     this.introCameraSwayToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-camera-sway');
     this.introShowFpsToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-show-fps');
-    this.introMobileFlipToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-mobile-flip');
     this.introCinematic = new LockstepIntroCinematic({
       elements: {
         panel: this.introPanel,
@@ -349,7 +348,6 @@ export class OverlayUI {
     this.lightingToggle = asElement<HTMLInputElement>(this.root, '#settings-lighting');
     this.cameraSwayToggle = asElement<HTMLInputElement>(this.root, '#settings-camera-sway');
     this.showFpsToggle = asElement<HTMLInputElement>(this.root, '#settings-show-fps');
-    this.mobileFlipToggle = asElement<HTMLInputElement>(this.root, '#settings-mobile-flip');
     this.scoreList = asElement<HTMLOListElement>(this.root, '#score-list');
     this.scoreStatus = asElement<HTMLElement>(this.root, '#score-status');
     this.hudScoreboard = asElement<HTMLElement>(this.root, '#hud-scoreboard');
@@ -369,13 +367,15 @@ export class OverlayUI {
     this.editorDeleteButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-delete');
     this.pauseTestBackButton = asElement<HTMLButtonElement>(this.root, '#btn-test-back-editor');
     this.mobileSwipeHint = asElement<HTMLElement>(this.root, '#mobile-swipe-hint');
-    this.mobileFlipFab = asElement<HTMLButtonElement>(this.root, '#btn-mobile-flip-fab');
     this.mobileOnlySettings = Array.from(this.root.querySelectorAll<HTMLElement>('[data-mobile-only]'));
     this.isMobileDevice = isLikelyMobileDevice();
     if (!this.isMobileDevice) {
       for (const setting of this.mobileOnlySettings) {
         setting.hidden = true;
       }
+    }
+    if (this.controller.getSnapshot().settings.mobileRotateClockwise) {
+      this.controller.setMobileRotateClockwise(false);
     }
 
     this.buildPalette();
@@ -390,7 +390,37 @@ export class OverlayUI {
       <section class="intro-overlay" data-panel="intro">
         <canvas id="intro-canvas" aria-hidden="true"></canvas>
         <div class="intro-settings-corner">
-          <button type="button" id="btn-intro-settings-toggle" aria-label="Open intro settings">Tune</button>
+          <div class="intro-corner-buttons">
+            <button type="button" id="btn-intro-account-toggle" aria-label="Open account menu">Account</button>
+            <button type="button" id="btn-intro-settings-toggle" aria-label="Open intro settings" title="Settings">
+              &#9881;
+            </button>
+          </div>
+          <div class="intro-account-panel account-panel" id="intro-account-panel" hidden>
+            <h3>Account</h3>
+            <p class="account-status" id="account-status" aria-live="polite">Not signed in.</p>
+            <label for="account-username-input">Username</label>
+            <input
+              id="account-username-input"
+              type="text"
+              maxlength="24"
+              placeholder="lowercase_username"
+              autocapitalize="none"
+              spellcheck="false"
+            />
+            <label for="account-password-input">Password</label>
+            <input id="account-password-input" type="password" maxlength="128" placeholder="password" />
+            <label for="account-player-name-input">Player Name (optional for register)</label>
+            <input id="account-player-name-input" type="text" maxlength="32" placeholder="Defaults to username" />
+            <div class="button-row account-button-row">
+              <button type="button" id="btn-account-login">Sign In</button>
+              <button type="button" id="btn-account-register">Register</button>
+              <button type="button" id="btn-account-logout">Sign Out</button>
+            </div>
+            <p class="account-feedback" id="account-feedback" aria-live="polite">
+              Publish levels and save progress with an account.
+            </p>
+          </div>
           <div class="intro-settings-panel" id="intro-settings-panel" hidden>
             <h3>Settings</h3>
             <label for="intro-settings-music-volume">Music Volume</label>
@@ -409,10 +439,6 @@ export class OverlayUI {
               <input id="intro-settings-show-fps" type="checkbox" />
               Show FPS
             </label>
-            <label class="checkbox-row" data-mobile-only>
-              <input id="intro-settings-mobile-flip" type="checkbox" />
-              Rotate board 90 deg clockwise
-            </label>
             <button type="button" id="btn-intro-settings-close">Done</button>
           </div>
         </div>
@@ -426,37 +452,12 @@ export class OverlayUI {
             <h2>Enter Lockstep</h2>
             <label for="intro-player-name-input">Player Name</label>
             <input id="intro-player-name-input" type="text" maxlength="32" placeholder="Enter your name" />
-            <section class="account-panel">
-              <h3>Account</h3>
-              <p class="account-status" id="account-status" aria-live="polite">Not signed in.</p>
-              <label for="account-username-input">Username</label>
-              <input
-                id="account-username-input"
-                type="text"
-                maxlength="24"
-                placeholder="lowercase_username"
-                autocapitalize="none"
-                spellcheck="false"
-              />
-              <label for="account-password-input">Password</label>
-              <input id="account-password-input" type="password" maxlength="128" placeholder="password" />
-              <label for="account-player-name-input">Player Name (optional for register)</label>
-              <input id="account-player-name-input" type="text" maxlength="32" placeholder="Defaults to username" />
-              <div class="button-row account-button-row">
-                <button type="button" id="btn-account-login">Sign In</button>
-                <button type="button" id="btn-account-register">Register</button>
-                <button type="button" id="btn-account-logout">Sign Out</button>
-              </div>
-              <p class="account-feedback" id="account-feedback" aria-live="polite">
-                Publish levels and save progress with an account.
-              </p>
-            </section>
             <div class="intro-level-readout">
               Current Level
               <strong id="intro-current-level">Level 1</strong>
             </div>
             <p class="intro-level-hint">Press <kbd>ESC</kbd> in-game to open Level Select.</p>
-            <p class="intro-level-hint" data-mobile-only>Mobile: swipe anywhere to move. Use Rotate in settings.</p>
+            <p class="intro-level-hint" data-mobile-only>Mobile: swipe anywhere to move.</p>
           </div>
           <div class="button-row intro-button-row">
             <button type="button" id="btn-intro-start">Start</button>
@@ -467,11 +468,8 @@ export class OverlayUI {
 
       <div class="menu-status" id="menu-status" aria-live="polite"></div>
       <div class="mobile-swipe-hint" id="mobile-swipe-hint" data-mobile-only hidden>
-        Swipe anywhere to move. Use Rotate if you want landscape play.
+        Swipe anywhere to move.
       </div>
-      <button type="button" class="mobile-flip-fab" id="btn-mobile-flip-fab" data-mobile-only hidden>
-        Rotate: Off
-      </button>
       <aside class="hud-scoreboard" id="hud-scoreboard" hidden>
         <h3>High Scores</h3>
         <div id="hud-score-status" class="score-status">Lower is better (moves, then time)</div>
@@ -538,10 +536,6 @@ export class OverlayUI {
         <label class="checkbox-row">
           <input id="settings-show-fps" type="checkbox" />
           Show FPS
-        </label>
-        <label class="checkbox-row" data-mobile-only>
-          <input id="settings-mobile-flip" type="checkbox" />
-          Rotate board 90 deg clockwise
         </label>
 
         <div class="button-row">
@@ -630,8 +624,21 @@ export class OverlayUI {
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select').addEventListener('click', () => {
-      this.closeIntroSettings();
+      this.closeIntroPanels();
       this.openLevelSelectFromMenu();
+    });
+
+    this.introAccountButton.addEventListener('click', () => {
+      const shouldOpen = this.introAccountPanel.hidden;
+      this.closeIntroSettings();
+      this.introAccountPanel.hidden = !shouldOpen;
+      if (shouldOpen) {
+        if (this.authState.authenticated) {
+          this.accountLogoutButton.focus();
+        } else {
+          this.accountUsernameInput.focus();
+        }
+      }
     });
 
     this.accountLoginButton.addEventListener('click', () => {
@@ -663,31 +670,35 @@ export class OverlayUI {
     });
 
     this.introSettingsButton.addEventListener('click', () => {
-      this.introSettingsPanel.hidden = !this.introSettingsPanel.hidden;
-      if (!this.introSettingsPanel.hidden) {
+      const shouldOpen = this.introSettingsPanel.hidden;
+      this.closeIntroAccountMenu();
+      this.introSettingsPanel.hidden = !shouldOpen;
+      if (shouldOpen) {
         this.introMusicVolumeSlider.focus();
       }
     });
 
     this.introSettingsCloseButton.addEventListener('click', () => {
-      this.closeIntroSettings();
+      this.closeIntroPanels();
       this.introSettingsButton.focus();
     });
 
     this.introPanel.addEventListener('pointerdown', (event) => {
-      if (this.introSettingsPanel.hidden) {
+      if (this.introSettingsPanel.hidden && this.introAccountPanel.hidden) {
         return;
       }
 
       const target = event.target as Node;
-      const clickedToggle = target === this.introSettingsButton || this.introSettingsButton.contains(target);
-      if (clickedToggle) {
+      const clickedSettingsToggle = target === this.introSettingsButton || this.introSettingsButton.contains(target);
+      const clickedAccountToggle = target === this.introAccountButton || this.introAccountButton.contains(target);
+      if (clickedSettingsToggle || clickedAccountToggle) {
         return;
       }
 
-      const clickedPanel = this.introSettingsPanel.contains(target);
-      if (!clickedPanel) {
-        this.closeIntroSettings();
+      const clickedSettingsPanel = this.introSettingsPanel.contains(target);
+      const clickedAccountPanel = this.introAccountPanel.contains(target);
+      if (!clickedSettingsPanel && !clickedAccountPanel) {
+        this.closeIntroPanels();
       }
     });
 
@@ -826,19 +837,6 @@ export class OverlayUI {
       this.controller.setShowFps(this.introShowFpsToggle.checked);
     });
 
-    this.mobileFlipToggle.addEventListener('change', () => {
-      this.controller.setMobileRotateClockwise(this.mobileFlipToggle.checked);
-    });
-
-    this.introMobileFlipToggle.addEventListener('change', () => {
-      this.controller.setMobileRotateClockwise(this.introMobileFlipToggle.checked);
-    });
-
-    this.mobileFlipFab.addEventListener('click', () => {
-      const current = this.controller.getSnapshot().settings.mobileRotateClockwise;
-      this.controller.setMobileRotateClockwise(!current);
-    });
-
     this.editorGridRoot.addEventListener('pointerdown', (event) => {
       const target = event.target as HTMLElement;
       if ((event.buttons & 1) !== 1 || !target.dataset.x || !target.dataset.y) {
@@ -879,9 +877,9 @@ export class OverlayUI {
     window.addEventListener('keydown', (event) => {
       const snapshot = this.controller.getSnapshot();
       if (snapshot.screen === 'intro') {
-        if (event.key === 'Escape' && !this.introSettingsPanel.hidden) {
+        if (event.key === 'Escape' && (!this.introSettingsPanel.hidden || !this.introAccountPanel.hidden)) {
           event.preventDefault();
-          this.closeIntroSettings();
+          this.closeIntroPanels();
           return;
         }
 
@@ -1142,12 +1140,21 @@ export class OverlayUI {
       return;
     }
 
-    this.closeIntroSettings();
+    this.closeIntroPanels();
     this.controller.startSelectedLevel();
+  }
+
+  private closeIntroAccountMenu(): void {
+    this.introAccountPanel.hidden = true;
   }
 
   private closeIntroSettings(): void {
     this.introSettingsPanel.hidden = true;
+  }
+
+  private closeIntroPanels(): void {
+    this.closeIntroSettings();
+    this.closeIntroAccountMenu();
   }
 
   private openLevelSelectFromMenu(): void {
@@ -1187,8 +1194,6 @@ export class OverlayUI {
     this.introCameraSwayToggle.checked = snapshot.settings.cameraSwayEnabled;
     this.showFpsToggle.checked = snapshot.settings.showFps;
     this.introShowFpsToggle.checked = snapshot.settings.showFps;
-    this.mobileFlipToggle.checked = snapshot.settings.mobileRotateClockwise;
-    this.introMobileFlipToggle.checked = snapshot.settings.mobileRotateClockwise;
     this.statusText.textContent = snapshot.statusMessage ?? '';
     const currentLevel = snapshot.levels[snapshot.selectedLevelIndex];
     if (currentLevel) {
@@ -1206,12 +1211,6 @@ export class OverlayUI {
     this.pauseLevelSelectButton.disabled = !canPlay;
     this.editorSavePlayButton.disabled = false;
     this.pauseTestBackButton.hidden = !this.editorTestingPublishLevelId;
-    const showMobileGameUi =
-      this.isMobileDevice &&
-      canPlay &&
-      (snapshot.screen === 'playing' || snapshot.screen === 'paused' || snapshot.screen === 'level-select');
-    this.mobileFlipFab.hidden = !showMobileGameUi;
-    this.mobileFlipFab.textContent = snapshot.settings.mobileRotateClockwise ? 'Rotate: On' : 'Rotate: Off';
     const showSwipeHint = this.isMobileDevice && snapshot.screen === 'playing' && snapshot.gameState.moves === 0;
     this.mobileSwipeHint.hidden = !showSwipeHint;
 
@@ -1227,7 +1226,7 @@ export class OverlayUI {
       this.introCinematic.start();
     } else {
       this.introCinematic.stop();
-      this.closeIntroSettings();
+      this.closeIntroPanels();
     }
 
     if (screenChanged && snapshot.screen === 'main') {
@@ -1291,10 +1290,7 @@ export class OverlayUI {
     if (gameShell) {
       gameShell.classList.toggle('editor-screen-active', snapshot.screen === 'editor');
       gameShell.classList.toggle('level-select-screen-active', snapshot.screen === 'level-select');
-      gameShell.classList.toggle(
-        'mobile-rotate-clockwise',
-        this.isMobileDevice && snapshot.settings.mobileRotateClockwise,
-      );
+      gameShell.classList.remove('mobile-rotate-clockwise');
     }
     this.lastRenderedScreen = snapshot.screen;
   }

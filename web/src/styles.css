@@ -98,21 +98,6 @@ body::after {
   height: 100%;
 }
 
-#game-shell.mobile-rotate-clockwise #game-root {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 100vh;
-  height: 100vw;
-  transform: translate(-50%, -50%) rotate(90deg);
-  transform-origin: center;
-}
-
-#game-shell.mobile-rotate-clockwise #game-root canvas {
-  width: 100% !important;
-  height: 100% !important;
-}
-
 #menu-root {
   position: absolute;
   inset: 0;
@@ -204,14 +189,33 @@ body::after {
   align-items: flex-end;
 }
 
+.intro-corner-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+#btn-intro-account-toggle {
+  width: auto;
+  min-width: 98px;
+  border-radius: 999px;
+  border-color: rgba(124, 210, 255, 0.72);
+  background: rgba(8, 19, 33, 0.86);
+  box-shadow: 0 0 20px rgba(73, 186, 255, 0.2);
+  letter-spacing: 0.04em;
+}
+
 #btn-intro-settings-toggle {
-  min-width: 64px;
+  width: 46px;
+  height: 46px;
+  padding: 0;
   border-radius: 999px;
   border-color: rgba(124, 210, 255, 0.7);
   background: rgba(8, 19, 33, 0.86);
   box-shadow: 0 0 20px rgba(73, 186, 255, 0.2);
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  display: inline-grid;
+  place-items: center;
+  font-size: 22px;
+  line-height: 1;
 }
 
 .intro-settings-panel {
@@ -225,6 +229,30 @@ body::after {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.44);
   transform-origin: top right;
   animation: intro-settings-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.intro-account-panel {
+  pointer-events: auto;
+  width: min(360px, 86vw);
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(129, 213, 255, 0.34);
+  background: rgba(7, 14, 24, 0.9);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.44);
+  transform-origin: top right;
+  animation: intro-settings-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.intro-account-panel label {
+  display: block;
+  margin: 8px 0 4px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.intro-account-panel input {
+  width: 100%;
 }
 
 .intro-settings-panel h3 {
@@ -291,11 +319,10 @@ body::after {
 }
 
 .account-panel {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid rgba(124, 198, 244, 0.28);
-  border-radius: 10px;
-  background: rgba(6, 15, 27, 0.5);
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .account-panel h3 {
@@ -443,29 +470,17 @@ kbd {
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(16px + var(--safe-bottom));
-  width: min(460px, calc(100vw - 26px));
+  width: min(360px, calc(100vw - 32px));
   pointer-events: none;
-  padding: 8px 12px;
+  padding: 7px 11px;
   border-radius: 999px;
-  border: 1px solid rgba(137, 217, 255, 0.35);
-  background: rgba(6, 16, 28, 0.86);
-  color: #d6e9ff;
-  font-size: 12px;
+  border: 1px solid rgba(137, 217, 255, 0.24);
+  background: rgba(6, 16, 28, 0.8);
+  color: #c5dff6;
+  font-size: 11px;
   letter-spacing: 0.02em;
   text-align: center;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34);
-}
-
-.mobile-flip-fab {
-  position: absolute;
-  right: calc(12px + var(--safe-right));
-  bottom: calc(56px + var(--safe-bottom));
-  min-width: 92px;
-  border-radius: 999px;
-  border-color: rgba(124, 215, 255, 0.75);
-  background: rgba(8, 20, 34, 0.92);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-  z-index: 6;
 }
 
 [data-panel='main'] {
@@ -1104,22 +1119,26 @@ button:disabled {
     transform: none;
     width: auto;
     bottom: 12px;
-    padding: 12px;
-    display: block;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .intro-level-hint:not([data-mobile-only]) {
+    display: none;
+  }
+
+  .intro-level-hint[data-mobile-only] {
+    margin-top: 6px;
+    font-size: 11px;
   }
 
   .mobile-swipe-hint {
     bottom: calc(12px + var(--safe-bottom));
     font-size: 11px;
-    width: min(420px, calc(100vw - 20px));
-  }
-
-  .mobile-flip-fab {
-    right: calc(10px + var(--safe-right));
-    bottom: calc(48px + var(--safe-bottom));
-    min-width: 84px;
-    padding: 8px 10px;
-    font-size: 13px;
+    width: min(310px, calc(100vw - 20px));
+    padding: 6px 10px;
   }
 
   .menu-panel {
