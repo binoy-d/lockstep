@@ -36,7 +36,7 @@ async function bootstrap(): Promise<void> {
     const fromBackend = await fetchCustomLevels();
     for (const level of fromBackend) {
       try {
-        customLevels.push(parseLevelText(level.id, level.text));
+        customLevels.push(parseLevelText(level.id, level.text, level.name));
         customLevelOwners.set(level.id, {
           ownerUserId: level.ownerUserId,
           ownerUsername: level.ownerUsername,

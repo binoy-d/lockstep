@@ -28,7 +28,7 @@ import {
   type LevelScoreRecord,
 } from '../runtime/backendApi';
 import { isTextInputFocused } from '../runtime/inputFocus';
-import { getLevelLabel } from '../runtime/levelMeta';
+import { getLevelLabel, getLevelName } from '../runtime/levelMeta';
 import { LockstepIntroCinematic } from './introCinematic';
 
 const EDITOR_TEST_LEVEL_ID = '__editor-test-level';
@@ -156,6 +156,10 @@ export class OverlayUI {
 
   private readonly levelSelectGrid: HTMLElement;
 
+  private readonly levelSelectSearchInput: HTMLInputElement;
+
+  private readonly levelSelectSearchEmpty: HTMLElement;
+
   private readonly levelSelectCurrentText: HTMLElement;
 
   private readonly statusText: HTMLElement;
@@ -242,6 +246,8 @@ export class OverlayUI {
 
   private readonly editorIdInput: HTMLInputElement;
 
+  private readonly editorNameInput: HTMLInputElement;
+
   private readonly editorWidthInput: HTMLInputElement;
 
   private readonly editorHeightInput: HTMLInputElement;
@@ -308,6 +314,8 @@ export class OverlayUI {
 
   private levelSelectCardButtons = new Map<number, HTMLButtonElement>();
 
+  private levelSelectCardContainers = new Map<number, HTMLElement>();
+
   public constructor(root: HTMLElement, controller: GameController, options: OverlayUiOptions = {}) {
     this.root = root;
     this.controller = controller;
@@ -371,6 +379,8 @@ export class OverlayUI {
 
     this.levelSelect = asElement<HTMLSelectElement>(this.root, '#level-select-input');
     this.levelSelectGrid = asElement<HTMLElement>(this.root, '#level-select-grid');
+    this.levelSelectSearchInput = asElement<HTMLInputElement>(this.root, '#level-select-search-input');
+    this.levelSelectSearchEmpty = asElement<HTMLElement>(this.root, '#level-select-search-empty');
     this.levelSelectCurrentText = asElement<HTMLElement>(this.root, '#level-select-current');
     this.statusText = asElement<HTMLElement>(this.root, '#menu-status');
     this.playerNameInput = asElement<HTMLInputElement>(this.root, '#player-name-input');
@@ -389,6 +399,7 @@ export class OverlayUI {
     this.hudScoreList = asElement<HTMLOListElement>(this.root, '#hud-score-list');
     this.hudScoreStatus = asElement<HTMLElement>(this.root, '#hud-score-status');
 
+    this.editorNameInput = asElement<HTMLInputElement>(this.root, '#editor-level-name');
     this.editorIdInput = asElement<HTMLInputElement>(this.root, '#editor-level-id');
     this.editorWidthInput = asElement<HTMLInputElement>(this.root, '#editor-width');
     this.editorHeightInput = asElement<HTMLInputElement>(this.root, '#editor-height');
@@ -557,6 +568,14 @@ export class OverlayUI {
             <p>Pick a map to play, copy any map into the editor, or create a blank one with +.</p>
           </div>
           <div class="level-select-header-actions">
+            <label for="level-select-search-input" class="level-select-search-label">Search by level name</label>
+            <input
+              id="level-select-search-input"
+              type="search"
+              placeholder="e.g. relay, custom, maze"
+              autocomplete="off"
+              spellcheck="false"
+            />
             <button type="button" id="btn-level-start">Play Selected</button>
             <button type="button" id="btn-level-back">Back</button>
           </div>
@@ -565,6 +584,7 @@ export class OverlayUI {
         <div class="level-select-layout">
           <section class="level-select-grid-panel">
             <select id="level-select-input" class="level-select-hidden-input" aria-hidden="true" tabindex="-1"></select>
+            <p id="level-select-search-empty" class="level-select-search-empty" hidden>No levels match this search.</p>
             <div id="level-select-grid" class="level-select-grid" role="listbox" aria-label="Level grid"></div>
           </section>
 
@@ -619,8 +639,10 @@ export class OverlayUI {
           <aside class="editor-sidebar">
             <section class="editor-card">
               <h3>Map Setup</h3>
+              <label for="editor-level-name">Level Name (required)</label>
+              <input id="editor-level-name" type="text" maxlength="64" placeholder="Enter level name" />
               <label for="editor-level-id">Level ID</label>
-              <input id="editor-level-id" type="text" placeholder="custom-level-1" />
+              <input id="editor-level-id" type="text" placeholder="auto-generated-from-name" readonly />
               <div class="editor-dimensions">
                 <div>
                   <label for="editor-width">Width</label>
@@ -854,6 +876,14 @@ export class OverlayUI {
       const level = Number.parseInt(this.levelSelect.value, 10);
       this.controller.setSelectedLevel(level);
       void this.loadScoresForSelectedLevel(true);
+    });
+
+    this.levelSelectSearchInput.addEventListener('input', () => {
+      this.applyLevelSearchFilter();
+    });
+
+    this.editorNameInput.addEventListener('input', () => {
+      this.refreshEditorAutoId();
     });
 
     this.musicVolumeSlider.addEventListener('input', () => {
@@ -1270,7 +1300,7 @@ export class OverlayUI {
     this.statusText.textContent = snapshot.statusMessage ?? '';
     const currentLevel = snapshot.levels[snapshot.selectedLevelIndex];
     if (currentLevel) {
-      const label = getLevelLabel(currentLevel.id, snapshot.selectedLevelIndex);
+      const label = getLevelLabel(currentLevel.id, snapshot.selectedLevelIndex, currentLevel.name);
       this.introCurrentLevelText.textContent = label;
       this.mainCurrentLevelText.textContent = label;
       this.levelSelectCurrentText.textContent = `${label} (${currentLevel.id})`;
@@ -1338,7 +1368,7 @@ export class OverlayUI {
       if (!canPlay) {
         this.editorPlayerNameInput.focus();
       } else {
-        this.editorIdInput.focus();
+        this.editorNameInput.focus();
       }
     }
 
@@ -1347,6 +1377,7 @@ export class OverlayUI {
     }
 
     this.refreshAccountUi(snapshot);
+    this.refreshEditorAutoId();
     this.syncSavedProgress(snapshot);
 
     if (snapshot.screen === 'playing' || snapshot.screen === 'paused') {
@@ -1371,8 +1402,56 @@ export class OverlayUI {
     this.lastRenderedScreen = snapshot.screen;
   }
 
+  private getDisplayLevelName(level: ParsedLevel, index: number): string {
+    return getLevelName(level.id, index, level.name);
+  }
+
+  private applyLevelSearchFilter(): void {
+    const query = this.levelSelectSearchInput.value.trim().toLowerCase();
+    let visibleCount = 0;
+
+    for (const [index, card] of this.levelSelectCardContainers) {
+      const level = this.lastSnapshot?.levels[index];
+      const levelName = level ? this.getDisplayLevelName(level, index).toLowerCase() : '';
+      const matches = query.length === 0 || levelName.includes(query);
+      card.hidden = !matches;
+      if (matches) {
+        visibleCount += 1;
+      }
+    }
+
+    const addCard = this.levelSelectGrid.querySelector<HTMLElement>('.level-card-add');
+    if (addCard) {
+      addCard.hidden = query.length > 0;
+    }
+
+    this.levelSelectSearchEmpty.hidden = visibleCount > 0;
+
+    const snapshot = this.lastSnapshot;
+    if (!snapshot) {
+      return;
+    }
+
+    const selectedCard = this.levelSelectCardContainers.get(snapshot.selectedLevelIndex);
+    const selectedIsVisible = Boolean(selectedCard && !selectedCard.hidden);
+    if (selectedIsVisible) {
+      return;
+    }
+
+    const firstVisible = Array.from(this.levelSelectCardContainers.entries()).find(
+      ([, container]) => !container.hidden,
+    )?.[0];
+    if (firstVisible === undefined || firstVisible === snapshot.selectedLevelIndex) {
+      return;
+    }
+
+    this.controller.setSelectedLevel(firstVisible);
+    void this.loadScoresForSelectedLevel(true);
+  }
+
   private syncLevelOptions(snapshot: ControllerSnapshot): void {
     const levelIdsSignature = snapshot.levels.map((level) => level.id).join('|');
+    const levelNamesSignature = snapshot.levels.map((level) => level.name ?? '').join('|');
     const authSignature = this.authState.user
       ? `${this.authState.user.id}:${this.authState.user.isAdmin ? 'admin' : 'user'}`
       : 'anonymous';
@@ -1386,20 +1465,22 @@ export class OverlayUI {
         return `${owner?.ownerUserId ?? 'none'}:${owner?.ownerUsername ?? ''}`;
       })
       .join('|');
-    const signature = `${levelIdsSignature}::${authSignature}::${ownershipSignature}`;
+    const signature = `${levelIdsSignature}::${levelNamesSignature}::${authSignature}::${ownershipSignature}`;
     if (this.levelSelect.dataset.signature !== signature) {
       this.levelSelect.innerHTML = '';
       this.levelSelectGrid.innerHTML = '';
       this.levelSelectCardButtons.clear();
+      this.levelSelectCardContainers.clear();
       snapshot.levels.forEach((level, index) => {
         const menuOption = document.createElement('option');
         menuOption.value = String(index);
-        menuOption.textContent = `${getLevelLabel(level.id, index)} (${level.id})`;
+        menuOption.textContent = `${getLevelLabel(level.id, index, level.name)} (${level.id})`;
         this.levelSelect.append(menuOption);
 
         const { container, selectButton } = this.createLevelSelectCard(level, index);
         this.levelSelectGrid.append(container);
         this.levelSelectCardButtons.set(index, selectButton);
+        this.levelSelectCardContainers.set(index, container);
       });
       this.levelSelectGrid.append(this.createAddLevelCard());
       this.levelSelect.dataset.signature = signature;
@@ -1413,12 +1494,14 @@ export class OverlayUI {
     for (const [index, button] of this.levelSelectCardButtons) {
       const isSelected = index === snapshot.selectedLevelIndex;
       button.classList.toggle('level-card-selected', isSelected);
-      const card = button.closest('.level-card');
+      const card = this.levelSelectCardContainers.get(index) ?? button.closest('.level-card');
       if (card) {
         card.classList.toggle('level-card-selected', isSelected);
         card.setAttribute('aria-selected', isSelected ? 'true' : 'false');
       }
     }
+
+    this.applyLevelSearchFilter();
   }
 
   private createLevelSelectCard(
@@ -1494,7 +1577,7 @@ export class OverlayUI {
     cardHeader.className = 'level-card-header';
 
     const cardTitle = document.createElement('strong');
-    cardTitle.textContent = getLevelLabel(level.id, index);
+    cardTitle.textContent = getLevelLabel(level.id, index, level.name);
     cardHeader.append(cardTitle);
 
     const cardId = document.createElement('span');
@@ -1550,10 +1633,13 @@ export class OverlayUI {
   }
 
   private openEditorForExistingLevel(level: ParsedLevel): void {
+    const snapshot = this.controller.getSnapshot();
+    const levelIndex = snapshot.levels.findIndex((entry) => entry.id === level.id);
     this.editorGrid = cloneGrid(level.grid);
     this.editorTestingPublishLevelId = null;
     this.editorLoadedLevelId = level.id;
-    this.editorIdInput.value = level.id;
+    this.editorNameInput.value = this.getDisplayLevelName(level, levelIndex >= 0 ? levelIndex : 0);
+    this.refreshEditorAutoId();
     this.renderEditorGrid();
     this.showEditorFeedback(`Editing ${level.id}. Test + Play, then publish when ready.`);
     this.controller.openEditor();
@@ -1748,6 +1834,33 @@ export class OverlayUI {
     return nextCustomLevelId(existingIds);
   }
 
+  private normalizeEditorLevelName(raw: string): string {
+    return raw.trim().replace(/\s+/g, ' ').slice(0, 64);
+  }
+
+  private refreshEditorAutoId(): void {
+    const snapshot = this.lastSnapshot ?? this.controller.getSnapshot();
+    const levelName = this.normalizeEditorLevelName(this.editorNameInput.value);
+
+    if (this.editorLoadedLevelId) {
+      this.editorIdInput.value = this.editorLoadedLevelId;
+      return;
+    }
+
+    if (this.editorTestingPublishLevelId) {
+      this.editorIdInput.value = this.editorTestingPublishLevelId;
+      return;
+    }
+
+    if (!levelName) {
+      this.editorIdInput.value = this.defaultEditorId();
+      return;
+    }
+
+    const baseId = levelIdFromInput(levelName);
+    this.editorIdInput.value = this.resolveSaveId(baseId, snapshot);
+  }
+
   private renderEditorGrid(): void {
     const width = this.editorGrid[0]?.length ?? 0;
     this.editorGridRoot.innerHTML = '';
@@ -1808,15 +1921,19 @@ export class OverlayUI {
   }
 
   private openEditorForCopiedLevel(level: ParsedLevel): void {
+    const snapshot = this.controller.getSnapshot();
+    const levelIndex = snapshot.levels.findIndex((entry) => entry.id === level.id);
+    const sourceName = this.getDisplayLevelName(level, levelIndex >= 0 ? levelIndex : 0);
     this.editorGrid = cloneGrid(level.grid);
     this.editorTestingPublishLevelId = null;
     this.editorLoadedLevelId = null;
-    this.editorIdInput.value = this.defaultEditorId();
+    this.editorNameInput.value = `${sourceName} Copy`;
+    this.refreshEditorAutoId();
     this.renderEditorGrid();
     this.controller.openEditor();
     this.showEditorFeedback(
       this.authState.authenticated
-        ? `Copied ${level.id}. Publish with a new level id.`
+        ? `Copied ${level.id}. Set your level name and publish.`
         : `Copied ${level.id}. Sign in to publish your copy.`,
     );
   }
@@ -1825,7 +1942,8 @@ export class OverlayUI {
     this.editorGrid = this.createBlankGrid(25, 16);
     this.editorTestingPublishLevelId = null;
     this.editorLoadedLevelId = null;
-    this.editorIdInput.value = this.defaultEditorId();
+    this.editorNameInput.value = '';
+    this.refreshEditorAutoId();
     this.renderEditorGrid();
     this.controller.openEditor();
     this.showEditorFeedback(
@@ -1864,11 +1982,21 @@ export class OverlayUI {
     return candidate;
   }
 
-  private getPublishLevelId(snapshot: ControllerSnapshot): string {
-    const requestedId = levelIdFromInput(this.editorIdInput.value);
-    const publishId = this.resolveSaveId(requestedId, snapshot);
+  private getPublishLevelTarget(snapshot: ControllerSnapshot): { id: string; name: string } | null {
+    const levelName = this.normalizeEditorLevelName(this.editorNameInput.value);
+    if (!levelName) {
+      this.showEditorFeedback('Enter a level name before testing or publishing.', true);
+      this.editorNameInput.focus();
+      return null;
+    }
+
+    const baseId = this.editorLoadedLevelId ?? this.editorTestingPublishLevelId ?? levelIdFromInput(levelName);
+    const publishId = this.resolveSaveId(baseId, snapshot);
     this.editorIdInput.value = publishId;
-    return publishId;
+    return {
+      id: publishId,
+      name: levelName,
+    };
   }
 
   private ensureEditorTestPlayerName(): void {
@@ -1907,8 +2035,12 @@ export class OverlayUI {
       return;
     }
 
-    const publishLevelId = this.getPublishLevelId(snapshot);
-    const runtimeLevelId = `${EDITOR_TEST_LEVEL_ID}-${publishLevelId}`;
+    const publishTarget = this.getPublishLevelTarget(snapshot);
+    if (!publishTarget) {
+      return;
+    }
+
+    const runtimeLevelId = `${EDITOR_TEST_LEVEL_ID}-${publishTarget.id}`;
     const text = serializeGrid(this.editorGrid);
 
     try {
@@ -1918,13 +2050,13 @@ export class OverlayUI {
       return;
     }
 
-    const parsed = parseLevelText(runtimeLevelId, text);
+    const parsed = parseLevelText(runtimeLevelId, text, publishTarget.name);
     const levelIndex = this.controller.upsertLevel(parsed);
-    this.editorTestingPublishLevelId = publishLevelId;
-    this.editorLoadedLevelId = publishLevelId;
+    this.editorTestingPublishLevelId = publishTarget.id;
+    this.editorLoadedLevelId = publishTarget.id;
     this.controller.startLevel(levelIndex);
     this.showEditorFeedback(
-      `Testing ${publishLevelId}. Beat it while signed in, then publish from the editor.`,
+      `Testing ${publishTarget.id}. Beat it while signed in, then publish from the editor.`,
     );
   }
 
@@ -1940,7 +2072,7 @@ export class OverlayUI {
     this.controller.removeLevel(runtimeLevelId);
     this.controller.openEditor();
     this.editorLoadedLevelId = publishLevelId;
-    this.editorIdInput.value = publishLevelId;
+    this.refreshEditorAutoId();
     this.renderEditorGrid();
     this.showEditorFeedback(`Back in editor for ${publishLevelId}. Publish when ready.`);
   }
@@ -1961,10 +2093,13 @@ export class OverlayUI {
       return;
     }
 
-    const levelId = this.getPublishLevelId(snapshot);
+    const publishTarget = this.getPublishLevelTarget(snapshot);
+    if (!publishTarget) {
+      return;
+    }
 
     try {
-      ensureParseableLevel(levelId, this.editorGrid);
+      ensureParseableLevel(publishTarget.id, this.editorGrid);
     } catch (error) {
       this.showEditorFeedback(String(error), true);
       return;
@@ -1975,15 +2110,16 @@ export class OverlayUI {
     try {
       await this.controller.waitForPendingScoreSubmissions();
       const saved = await saveCustomLevel({
-        id: levelId,
-        name: levelId,
+        id: publishTarget.id,
+        name: publishTarget.name,
         text,
       });
 
-      const parsed = parseLevelText(saved.id, saved.text);
+      const parsed = parseLevelText(saved.id, saved.text, saved.name);
       this.controller.upsertLevel(parsed);
       this.editorLoadedLevelId = saved.id;
-      this.editorIdInput.value = saved.id;
+      this.editorNameInput.value = saved.name;
+      this.refreshEditorAutoId();
       this.customLevelOwners.set(saved.id, {
         ownerUserId: saved.ownerUserId,
         ownerUsername: saved.ownerUsername,
@@ -2025,7 +2161,8 @@ export class OverlayUI {
       this.customLevelOwners.delete(levelId);
       this.controller.removeLevel(levelId);
       this.editorLoadedLevelId = null;
-      this.editorIdInput.value = this.defaultEditorId();
+      this.editorNameInput.value = '';
+      this.refreshEditorAutoId();
       this.showEditorFeedback(`Deleted ${levelId}.`);
     } catch (error) {
       this.showEditorFeedback(`Delete failed: ${formatError(error)}`, true);

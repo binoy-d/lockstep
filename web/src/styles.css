@@ -699,6 +699,11 @@ button:disabled {
   width: min(220px, 100%);
 }
 
+.level-select-search-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .level-select-header-actions button {
   width: 100%;
 }
@@ -726,6 +731,12 @@ button:disabled {
   height: 1px;
   opacity: 0;
   pointer-events: none;
+}
+
+.level-select-search-empty {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #9eb5cb;
 }
 
 .level-select-grid {
@@ -1044,6 +1055,12 @@ button:disabled {
 .editor-card select,
 .editor-card button {
   width: 100%;
+}
+
+#editor-level-id[readonly] {
+  color: #a9bbcc;
+  background: rgba(8, 16, 28, 0.88);
+  cursor: default;
 }
 
 .editor-card-buttons {

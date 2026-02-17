@@ -23,12 +23,26 @@ function stableHash(text: string): number {
   return hash >>> 0;
 }
 
-export function getLevelName(levelId: string, levelIndex: number): string {
+function normalizeLevelName(raw: string | undefined): string | null {
+  if (typeof raw !== 'string') {
+    return null;
+  }
+
+  const normalized = raw.trim().replace(/\s+/g, ' ');
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function getLevelName(levelId: string, levelIndex: number, customName?: string): string {
+  const normalizedCustomName = normalizeLevelName(customName);
+  if (normalizedCustomName) {
+    return normalizedCustomName;
+  }
+
   return BUILT_IN_LEVEL_NAMES[levelId] ?? `Custom Circuit ${levelIndex + 1}`;
 }
 
-export function getLevelLabel(levelId: string, levelIndex: number): string {
-  return `Level ${levelIndex + 1}: ${getLevelName(levelId, levelIndex)}`;
+export function getLevelLabel(levelId: string, levelIndex: number, customName?: string): string {
+  return `Level ${levelIndex + 1}: ${getLevelName(levelId, levelIndex, customName)}`;
 }
 
 export function getLevelMusicSeed(levelId: string, levelIndex: number): number {

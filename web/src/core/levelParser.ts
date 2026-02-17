@@ -10,7 +10,7 @@ export function cloneGrid(grid: string[][]): string[][] {
   return grid.map((row) => row.slice());
 }
 
-export function parseLevelText(id: string, raw: string): ParsedLevel {
+export function parseLevelText(id: string, raw: string, name?: string): ParsedLevel {
   const normalized = raw.replace(/\r/g, '');
   const lines = normalized.split('\n');
 
@@ -63,6 +63,7 @@ export function parseLevelText(id: string, raw: string): ParsedLevel {
 
   return {
     id,
+    name,
     width,
     height: lines.length,
     grid,
@@ -78,6 +79,7 @@ export function serializeParsedLevel(level: ParsedLevel): string {
 export function cloneParsedLevel(level: ParsedLevel): ParsedLevel {
   return {
     id: level.id,
+    name: level.name,
     width: level.width,
     height: level.height,
     grid: cloneGrid(level.grid),

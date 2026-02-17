@@ -705,8 +705,11 @@ class PuzzleScene extends Phaser.Scene {
     this.hudText.setWordWrapWidth(
       Math.max(118, viewportWidth - this.safeInsetLeft - this.safeInsetRight - hudInsetX - reservedRightInset),
     );
+    const activeLevel = state.levels[state.levelId];
+    const displayName = activeLevel?.name;
     if (this.isMobileDevice) {
-      const levelName = state.levelId.length > 20 ? `${state.levelId.slice(0, 19)}…` : state.levelId;
+      const mobileLabel = getLevelLabel(state.levelId, state.levelIndex, displayName);
+      const levelName = mobileLabel.length > 28 ? `${mobileLabel.slice(0, 27)}…` : mobileLabel;
       this.hudText.setFontSize('11px');
       this.hudText.setText(
         `L${state.levelIndex + 1}/${state.levelIds.length} • M${state.moves} • P${state.players.length}/${state.totalPlayers}${isPaused ? ' • PAUSED' : ''}\n${levelName}`,
@@ -714,7 +717,7 @@ class PuzzleScene extends Phaser.Scene {
     } else {
       this.hudText.setFontSize('16px');
       this.hudText.setText(
-        `${getLevelLabel(state.levelId, state.levelIndex)} (${state.levelIndex + 1}/${state.levelIds.length})  Moves ${state.moves}  Players ${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}`,
+        `${getLevelLabel(state.levelId, state.levelIndex, displayName)} (${state.levelIndex + 1}/${state.levelIds.length})  Moves ${state.moves}  Players ${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}`,
       );
     }
     this.updateFpsLabel(snapshot, viewportWidth, time);

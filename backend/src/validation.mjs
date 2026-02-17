@@ -191,7 +191,11 @@ export function validateLevelPayload(input) {
   }
 
   const id = validateLevelId(input.id);
-  const candidateName = sanitizeName(input.name || id, 64) || id;
+  const candidateName = sanitizeName(input.name, 64);
+  if (candidateName.length === 0) {
+    throw new Error('Level name is required.');
+  }
+
   if (containsBlockedLanguage(candidateName)) {
     throw new Error('Level name contains blocked language.');
   }

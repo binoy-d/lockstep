@@ -15,6 +15,7 @@ export interface Enemy extends Vec2 {
 
 export interface ParsedLevel {
   id: string;
+  name?: string;
   width: number;
   height: number;
   grid: string[][];
