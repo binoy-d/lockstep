@@ -228,6 +228,37 @@ function drawRadialGlow(buffer, centerX, centerY, radius, color, maxAlpha = 1) {
   }
 }
 
+function drawRectVignette(buffer, x, y, width, height, maxAlpha = 128, innerRadius = 0.5) {
+  const centerX = x + width * 0.5;
+  const centerY = y + height * 0.5;
+  const radiusX = Math.max(1, width * 0.5);
+  const radiusY = Math.max(1, height * 0.5);
+  const startX = Math.max(0, Math.floor(x));
+  const endX = Math.min(PREVIEW_WIDTH - 1, Math.ceil(x + width));
+  const startY = Math.max(0, Math.floor(y));
+  const endY = Math.min(PREVIEW_HEIGHT - 1, Math.ceil(y + height));
+
+  for (let row = startY; row <= endY; row += 1) {
+    const normalizedY = (row - centerY) / radiusY;
+    for (let col = startX; col <= endX; col += 1) {
+      const normalizedX = (col - centerX) / radiusX;
+      const distance = Math.sqrt(normalizedX * normalizedX + normalizedY * normalizedY);
+      const clampedDistance = Math.min(1, distance);
+      const edgeWeight = Math.max(0, (clampedDistance - innerRadius) / Math.max(0.0001, 1 - innerRadius));
+      if (edgeWeight <= 0) {
+        continue;
+      }
+
+      const alpha = Math.round(Math.min(1, edgeWeight) * maxAlpha);
+      if (alpha <= 0) {
+        continue;
+      }
+
+      blendPixel(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, col, row, 0, 0, 0, alpha);
+    }
+  }
+}
+
 function parseGrid(levelText) {
   if (typeof levelText !== 'string') {
     return null;
@@ -391,31 +422,38 @@ function drawLevelMiniMap(buffer, grid) {
   const rows = grid.length;
   const cols = grid[0].length;
 
-  const cardX = 92;
-  const cardY = 84;
-  const cardWidth = 500;
-  const cardHeight = 500;
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, cardX, cardY, cardWidth, cardHeight, [4, 18, 36, 235]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, cardX, cardY, cardWidth, 2, [91, 200, 255, 255]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, cardX, cardY + cardHeight - 2, cardWidth, 2, [91, 200, 255, 255]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, cardX, cardY, 2, cardHeight, [91, 200, 255, 255]);
-  fillRect(
+  const frameX = 92;
+  const frameY = 84;
+  const frameWidth = 500;
+  const frameHeight = 500;
+  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, frameX, frameY, frameWidth, 1, [91, 200, 255, 160]);
+  fillRectBlend(
     buffer,
     PREVIEW_WIDTH,
     PREVIEW_HEIGHT,
-    cardX + cardWidth - 2,
-    cardY,
-    2,
-    cardHeight,
-    [91, 200, 255, 255],
+    frameX,
+    frameY + frameHeight - 1,
+    frameWidth,
+    1,
+    [91, 200, 255, 140],
+  );
+  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, frameX, frameY, 1, frameHeight, [91, 200, 255, 140]);
+  fillRectBlend(
+    buffer,
+    PREVIEW_WIDTH,
+    PREVIEW_HEIGHT,
+    frameX + frameWidth - 1,
+    frameY,
+    1,
+    frameHeight,
+    [91, 200, 255, 140],
   );
 
-  const innerPadding = 26;
-  const tileAreaX = cardX + innerPadding;
-  const tileAreaY = cardY + innerPadding;
-  const tileAreaWidth = cardWidth - innerPadding * 2;
-  const tileAreaHeight = cardHeight - innerPadding * 2;
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, tileAreaX, tileAreaY, tileAreaWidth, tileAreaHeight, [6, 11, 17, 255]);
+  const padding = 8;
+  const tileAreaX = frameX + padding;
+  const tileAreaY = frameY + padding;
+  const tileAreaWidth = frameWidth - padding * 2;
+  const tileAreaHeight = frameHeight - padding * 2;
 
   const gap = 0;
   const tileSize = Math.max(
@@ -447,18 +485,13 @@ function drawLevelMiniMap(buffer, grid) {
       );
     }
   }
+
+  drawRectVignette(buffer, mapOffsetX, mapOffsetY, mapWidth, mapHeight, 128, 0.5);
 }
 
 function drawAccentPanel(buffer, levelName, levelId) {
   const panelX = 622;
   const panelY = 76;
-  const panelWidth = 500;
-  const panelHeight = 508;
-  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 4, panelY + 18, panelWidth - 8, 170, [5, 16, 31, 172]);
-  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 4, panelY + 252, panelWidth - 8, 240, [5, 16, 31, 184]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 22, panelY + 30, 364, 10, [96, 227, 255, 235]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 22, panelY + 48, 434, 6, [136, 216, 255, 230]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 22, panelY + 134, 456, 6, [96, 190, 235, 220]);
 
   drawTextLine(
     buffer,
@@ -474,7 +507,7 @@ function drawAccentPanel(buffer, levelName, levelId) {
     buffer,
     'MOVE TO THE GOAL',
     panelX + 22,
-    panelY + 164,
+    panelY + 168,
     3,
     [101, 234, 255, 255],
     [12, 58, 84, 210],
@@ -484,46 +517,29 @@ function drawAccentPanel(buffer, levelName, levelId) {
     buffer,
     'AVOID LAVA. DODGE ENEMIES.',
     panelX + 22,
-    panelY + 198,
+    panelY + 202,
     2,
     [165, 203, 235, 240],
     [10, 38, 62, 160],
     1,
   );
 
-  const levelCardX = panelX + 20;
-  const levelCardY = panelY + 286;
-  const levelCardWidth = panelWidth - 40;
-  const levelCardHeight = 194;
-  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, levelCardX, levelCardY, levelCardWidth, levelCardHeight, [6, 18, 33, 198]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, levelCardX, levelCardY, levelCardWidth, 2, [102, 243, 192, 220]);
-  fillRect(
-    buffer,
-    PREVIEW_WIDTH,
-    PREVIEW_HEIGHT,
-    levelCardX,
-    levelCardY + levelCardHeight - 2,
-    levelCardWidth,
-    2,
-    [102, 243, 192, 190],
-  );
-
   drawTextLine(
     buffer,
     'LEVEL',
-    levelCardX + 16,
-    levelCardY + 16,
-    3,
+    panelX + 24,
+    panelY + 302,
+    2,
     [121, 247, 199, 255],
     [16, 56, 47, 220],
     1,
   );
 
   const displayLevelName = normalizePreviewText(levelName, normalizePreviewText(levelId, 'UNKNOWN LEVEL')).toUpperCase();
-  const levelNameLines = wrapText(displayLevelName, 24, 2);
-  let levelNameY = levelCardY + 56;
+  const levelNameLines = wrapText(displayLevelName, 28, 2);
+  let levelNameY = panelY + 334;
   for (const line of levelNameLines) {
-    drawTextLine(buffer, line, levelCardX + 16, levelNameY, 3, [238, 246, 255, 250], [24, 40, 62, 180], 1);
+    drawTextLine(buffer, line, panelX + 24, levelNameY, 3, [238, 246, 255, 250], [24, 40, 62, 180], 1);
     levelNameY += (FONT_HEIGHT + 1) * 3;
   }
 
@@ -531,10 +547,12 @@ function drawAccentPanel(buffer, levelName, levelId) {
   drawTextLine(
     buffer,
     `ID: ${normalizedLevelId}`,
-    levelCardX + 16,
-    levelCardY + levelCardHeight - 36,
+    panelX + 24,
+    panelY + 454,
     2,
     [148, 196, 231, 240],
+    [10, 38, 62, 150],
+    1,
   );
 }
 
@@ -556,8 +574,8 @@ export function renderLevelPreviewPng(level) {
   if (grid) {
     drawLevelMiniMap(pixels, grid);
   } else {
-    fillRect(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 92, 84, 500, 500, [16, 24, 36, 230]);
-    fillRect(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 118, 110, 448, 448, [23, 31, 45, 255]);
+    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 92, 84, 500, 500, [15, 40, 64, 46]);
+    drawTextLine(pixels, 'LEVEL DATA UNAVAILABLE', 138, 320, 2, [172, 204, 232, 220], [10, 38, 62, 150], 1);
   }
 
   drawAccentPanel(pixels, level?.name ?? level?.id ?? 'LOCKSTEP', level?.id ?? 'unknown-level');
