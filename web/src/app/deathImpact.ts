@@ -147,14 +147,6 @@ export function detectEnemyImpact(previousState: GameState, direction: Direction
     return buildImpact(initialTouch, playerFromMap, enemyFromMap);
   }
 
-  for (const enemy of enemies) {
-    enemyTick(grid, enemy);
-    const touch = findEnemyTouch(players, enemies);
-    if (touch) {
-      return buildImpact(touch, playerFromMap, enemyFromMap);
-    }
-  }
-
   for (const original of [...players]) {
     const playerIndex = players.findIndex((player) => player.id === original.id);
     if (playerIndex === -1) {
@@ -187,6 +179,14 @@ export function detectEnemyImpact(previousState: GameState, direction: Direction
     }
   }
 
+  for (const enemy of enemies) {
+    enemyTick(grid, enemy);
+    const touch = findEnemyTouch(players, enemies);
+    if (touch) {
+      return buildImpact(touch, playerFromMap, enemyFromMap);
+    }
+  }
+
   return null;
 }
 
@@ -200,14 +200,6 @@ export function detectLavaImpact(previousState: GameState, direction: Direction)
   const initialTouch = findEnemyTouch(players, enemies);
   if (initialTouch) {
     return null;
-  }
-
-  for (const enemy of enemies) {
-    enemyTick(grid, enemy);
-    const touch = findEnemyTouch(players, enemies);
-    if (touch) {
-      return null;
-    }
   }
 
   for (const original of [...players]) {
@@ -246,6 +238,14 @@ export function detectLavaImpact(previousState: GameState, direction: Direction)
     }
   }
 
+  for (const enemy of enemies) {
+    enemyTick(grid, enemy);
+    const touch = findEnemyTouch(players, enemies);
+    if (touch) {
+      return null;
+    }
+  }
+
   return null;
 }
 
@@ -260,14 +260,6 @@ export function detectGoalFinishImpact(previousState: GameState, direction: Dire
   const initialTouch = findEnemyTouch(players, enemies);
   if (initialTouch) {
     return null;
-  }
-
-  for (const enemy of enemies) {
-    enemyTick(grid, enemy);
-    const touch = findEnemyTouch(players, enemies);
-    if (touch) {
-      return null;
-    }
   }
 
   for (const original of [...players]) {
@@ -306,6 +298,14 @@ export function detectGoalFinishImpact(previousState: GameState, direction: Dire
 
     const enemyTouch = enemies.some((enemy) => enemy.x === player.x && enemy.y === player.y);
     if (enemyTouch) {
+      return null;
+    }
+  }
+
+  for (const enemy of enemies) {
+    enemyTick(grid, enemy);
+    const touch = findEnemyTouch(players, enemies);
+    if (touch) {
       return null;
     }
   }

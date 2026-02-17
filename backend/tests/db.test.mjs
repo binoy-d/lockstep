@@ -31,6 +31,7 @@ test('upserts levels and returns latest level payload', () => {
 
   assert.equal(first.id, 'custom-level-1');
   assert.equal(second.name, 'First Updated');
+  assert.equal(second.ownerUserId, null);
   assert.equal(db.listLevels().length, 1);
 
   rmSync(path, { force: true });
@@ -90,6 +91,56 @@ test('deletes a level and its scores', () => {
   assert.equal(db.listLevels().some((level) => level.id === 'custom-level-99'), false);
   assert.equal(db.getTopScores('custom-level-99', 10).length, 0);
   assert.equal(db.deleteLevel('custom-level-99'), false);
+
+  rmSync(path, { force: true });
+});
+
+test('manages users, ownership, and per-user progress', () => {
+  const path = makeTempPath('users');
+  const db = createDatabase(path);
+
+  const user = db.createUser({
+    username: 'owner_user',
+    passwordHash: 'hash',
+    playerName: 'Owner',
+    isAdmin: false,
+  });
+
+  db.upsertLevel({
+    id: 'custom-level-owned',
+    name: 'Owned',
+    text: ['###', '#P!', '###'].join('\n'),
+    authorName: user.playerName,
+    ownerUserId: user.id,
+  });
+
+  db.upsertLevel({
+    id: 'custom-level-unowned',
+    name: 'Unowned',
+    text: ['###', '#P!', '###'].join('\n'),
+    authorName: 'Anon',
+    ownerUserId: null,
+  });
+
+  const owned = db.getLevel('custom-level-owned');
+  assert.equal(owned.ownerUserId, user.id);
+  assert.equal(owned.ownerUsername, user.username);
+
+  const assigned = db.assignUnownedLevelsToUser(user.id);
+  assert.equal(assigned, 1);
+  assert.equal(db.getLevel('custom-level-unowned').ownerUserId, user.id);
+
+  db.saveUserProgress(user.id, 'custom-level-owned');
+  const progress = db.getUserProgress(user.id);
+  assert.equal(progress.selectedLevelId, 'custom-level-owned');
+  assert.equal(progress.userId, user.id);
+
+  const promoted = db.setUserAdmin(user.id, true);
+  assert.equal(Boolean(promoted.isAdmin), true);
+  const updated = db.updateUserCredentials(user.id, 'hash-2', 'OwnerTwo');
+  assert.equal(updated.passwordHash, 'hash-2');
+  assert.equal(updated.playerName, 'OwnerTwo');
+  assert.equal(db.getUserByUsername('owner_user').id, user.id);
 
   rmSync(path, { force: true });
 });

@@ -79,6 +79,7 @@ body::after {
   position: relative;
   width: 100%;
   height: 100%;
+  overflow: hidden;
 }
 
 #game-shell.editor-screen-active #game-root {
@@ -89,8 +90,7 @@ body::after {
 #game-shell.level-select-screen-active #game-root {
   filter: blur(4px) saturate(0.8);
   opacity: 0.42;
-  transform: scale(1.02);
-  transition: filter 180ms ease, opacity 180ms ease, transform 240ms ease;
+  transition: filter 180ms ease, opacity 180ms ease;
 }
 
 #game-root {
@@ -98,9 +98,19 @@ body::after {
   height: 100%;
 }
 
-#game-shell.mobile-flip-horizontal #game-root canvas {
-  transform: scaleX(-1);
+#game-shell.mobile-rotate-clockwise #game-root {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100vh;
+  height: 100vw;
+  transform: translate(-50%, -50%) rotate(90deg);
   transform-origin: center;
+}
+
+#game-shell.mobile-rotate-clockwise #game-root canvas {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 #menu-root {
@@ -256,7 +266,7 @@ body::after {
   display: grid;
   grid-template-columns: 1.4fr 1fr;
   gap: 14px;
-  align-items: end;
+  align-items: stretch;
 }
 
 .intro-menu-dock h2 {
@@ -278,6 +288,47 @@ body::after {
 
 #intro-player-name-input {
   width: 100%;
+}
+
+.account-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(124, 198, 244, 0.28);
+  border-radius: 10px;
+  background: rgba(6, 15, 27, 0.5);
+}
+
+.account-panel h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.account-status {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #d6ebff;
+}
+
+.account-button-row {
+  margin-top: 10px;
+  gap: 6px;
+}
+
+.account-button-row button {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+
+.account-feedback {
+  margin: 8px 0 0;
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.account-feedback-error {
+  color: var(--danger);
 }
 
 .intro-button-row {

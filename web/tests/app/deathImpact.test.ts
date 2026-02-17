@@ -10,26 +10,24 @@ function makeState(raw: string) {
 describe('enemy impact detection', () => {
   it('detects player stepping onto an enemy tile', () => {
     const initial = makeState(['######', '#P12 #', '######'].join('\n'));
-    const afterFirstMove = update(initial, { direction: 'right' }, 16.67);
-
-    const impact = detectEnemyImpact(afterFirstMove, 'right');
+    const impact = detectEnemyImpact(initial, 'right');
     expect(impact).toEqual({
       playerId: 0,
       enemyId: 0,
-      intersection: { x: 3, y: 1 },
-      playerFrom: { x: 2, y: 1 },
-      enemyFrom: { x: 3, y: 1 },
+      intersection: { x: 2, y: 1 },
+      playerFrom: { x: 1, y: 1 },
+      enemyFrom: { x: 2, y: 1 },
     });
   });
 
-  it('detects enemy moving onto a player before player movement', () => {
+  it('detects enemy moving onto a player after player movement resolves', () => {
     const base = makeState(['#######', '#P 12 #', '#######'].join('\n'));
     const seeded = {
       ...base,
       players: [{ ...base.players[0], x: 4, y: 1 }],
     };
 
-    const impact = detectEnemyImpact(seeded, 'left');
+    const impact = detectEnemyImpact(seeded, 'up');
     expect(impact).toEqual({
       playerId: 0,
       enemyId: 0,

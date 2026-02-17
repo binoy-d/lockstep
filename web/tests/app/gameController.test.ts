@@ -9,7 +9,7 @@ function makeSettings() {
     lightingEnabled: true,
     cameraSwayEnabled: true,
     showFps: false,
-    mobileFlipHorizontal: false,
+    mobileRotateClockwise: false,
   };
 }
 
@@ -181,25 +181,21 @@ describe('game controller', () => {
 
       controller.queueDirection('right');
       controller.fixedUpdate(16.67);
-      expect(controller.getSnapshot().gameState.moves).toBe(1);
-
-      controller.queueDirection('right');
-      controller.fixedUpdate(16.67);
 
       const deathSnapshot = controller.getSnapshot();
       expect(deathSnapshot.deathAnimation).not.toBeNull();
-      expect(deathSnapshot.gameState.moves).toBe(1);
+      expect(deathSnapshot.gameState.moves).toBe(0);
       expect(deathSnapshot.deathAnimation).toMatchObject({
         kind: 'enemy',
         playerId: 0,
         enemyId: 0,
-        intersection: { x: 3, y: 1 },
+        intersection: { x: 2, y: 1 },
       });
 
       const waitMs = deathSnapshot.deathAnimation?.durationMs ?? 0;
       now += waitMs - 1;
       controller.fixedUpdate(16.67);
-      expect(controller.getSnapshot().gameState.moves).toBe(1);
+      expect(controller.getSnapshot().gameState.moves).toBe(0);
 
       now += 2;
       controller.fixedUpdate(16.67);

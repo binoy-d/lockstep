@@ -2,6 +2,7 @@ import { Filter } from 'bad-words';
 import { createHash } from 'node:crypto';
 
 const LEVEL_ID_RE = /^[a-z0-9_-]{3,64}$/;
+const USERNAME_RE = /^[a-z0-9_]{3,24}$/;
 const TILE_RE = /^[# !xP1-9]$/;
 const PROFANITY_FILTER = new Filter();
 const LEGACY_HARD_R = String.fromCharCode(110, 105, 103, 103, 101, 114);
@@ -61,6 +62,65 @@ export function validatePlayerName(input) {
   }
 
   return value;
+}
+
+export function validateUsername(input) {
+  if (typeof input !== 'string') {
+    throw new Error('Username must be a string.');
+  }
+
+  const normalized = input.trim().toLowerCase();
+  if (!USERNAME_RE.test(normalized)) {
+    throw new Error('Username must use lowercase letters, numbers, or underscore (3-24 chars).');
+  }
+
+  if (containsBlockedLanguage(normalized)) {
+    throw new Error('Username contains blocked language.');
+  }
+
+  return normalized;
+}
+
+export function validatePassword(input) {
+  if (typeof input !== 'string') {
+    throw new Error('Password must be a string.');
+  }
+
+  if (input.length < 8 || input.length > 128) {
+    throw new Error('Password must be between 8 and 128 characters.');
+  }
+
+  return input;
+}
+
+export function validateRegisterPayload(input) {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Register payload must be an object.');
+  }
+
+  const username = validateUsername(input.username);
+  const password = validatePassword(input.password);
+  const playerName =
+    typeof input.playerName === 'string' && input.playerName.trim().length > 0
+      ? validatePlayerName(input.playerName)
+      : validatePlayerName(username);
+
+  return {
+    username,
+    password,
+    playerName,
+  };
+}
+
+export function validateLoginPayload(input) {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Login payload must be an object.');
+  }
+
+  return {
+    username: validateUsername(input.username),
+    password: validatePassword(input.password),
+  };
 }
 
 export function validateLevelId(input) {
@@ -140,7 +200,6 @@ export function validateLevelPayload(input) {
     id,
     name: candidateName,
     text: validateLevelText(input.text),
-    authorName: validatePlayerName(input.authorName),
   };
 }
 
@@ -198,12 +257,17 @@ export function validateDeleteLevelPayload(input) {
     throw new Error('Delete payload must be an object.');
   }
 
-  if (typeof input.password !== 'string' || input.password.length === 0) {
-    throw new Error('Admin password is required.');
+  return {
+    levelId: validateLevelId(input.levelId),
+  };
+}
+
+export function validateProgressPayload(input) {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Progress payload must be an object.');
   }
 
   return {
-    levelId: validateLevelId(input.levelId),
-    password: input.password,
+    selectedLevelId: validateLevelId(input.selectedLevelId),
   };
 }

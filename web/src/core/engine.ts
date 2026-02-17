@@ -241,12 +241,17 @@ export function update(state: GameState, input: UpdateInput, dtMs: number): Game
     lastEvent: 'turn-processed',
   };
 
-  next = runEnemyPhase(next);
+  // Resolve immediate overlaps from the previous state before processing movement.
+  if (hasEnemyTouch(next)) {
+    return resetCurrentLevel(next);
+  }
+
+  next = runPlayerPhase(next, input.direction);
   if (next.lastEvent === 'level-reset' || next.lastEvent === 'level-advanced' || next.status !== 'playing') {
     return next;
   }
 
-  next = runPlayerPhase(next, input.direction);
+  next = runEnemyPhase(next);
   return next;
 }
 

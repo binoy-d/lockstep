@@ -112,6 +112,20 @@ describe('update and state transitions', () => {
     expect(next.players[0]).toMatchObject({ x: 1, y: 1 });
   });
 
+  it('allows escaping from an incoming enemy tile during the player phase', () => {
+    const levels = parseLevels([['#######', '#P12  #', '#######'].join('\n')]);
+    const initial = createInitialState(levels);
+    const seeded = {
+      ...initial,
+      players: [{ ...initial.players[0], x: 3, y: 1 }],
+    };
+
+    const next = update(seeded, { direction: 'right' }, 16.67);
+    expect(next.lastEvent).toBe('turn-processed');
+    expect(next.players[0]).toMatchObject({ x: 4, y: 1 });
+    expect(next.enemies[0]).toMatchObject({ x: 3, y: 1 });
+  });
+
   it('returns a passive tick when already game-complete', () => {
     const levels = parseLevels([['#####', '#P!##', '#####'].join('\n')]);
     const complete = update(createInitialState(levels), { direction: 'right' }, 16.67);

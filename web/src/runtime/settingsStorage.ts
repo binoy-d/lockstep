@@ -4,7 +4,7 @@ export interface GameSettings {
   lightingEnabled: boolean;
   cameraSwayEnabled: boolean;
   showFps: boolean;
-  mobileFlipHorizontal: boolean;
+  mobileRotateClockwise: boolean;
 }
 
 const STORAGE_KEY = 'puzzle-game-settings-v1';
@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: GameSettings = {
   lightingEnabled: true,
   cameraSwayEnabled: true,
   showFps: false,
-  mobileFlipHorizontal: false,
+  mobileRotateClockwise: false,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -30,7 +30,10 @@ export function loadSettings(): GameSettings {
     }
 
     const parsed = JSON.parse(raw) as Partial<GameSettings>;
-    const parsedWithLegacy = parsed as Partial<GameSettings> & { volume?: number };
+    const parsedWithLegacy = parsed as Partial<GameSettings> & {
+      volume?: number;
+      mobileFlipHorizontal?: boolean;
+    };
     const musicVolume =
       typeof parsedWithLegacy.musicVolume === 'number'
         ? clamp(parsedWithLegacy.musicVolume, 0, 1)
@@ -58,10 +61,12 @@ export function loadSettings(): GameSettings {
         typeof parsed.showFps === 'boolean'
           ? parsed.showFps
           : DEFAULT_SETTINGS.showFps,
-      mobileFlipHorizontal:
-        typeof parsed.mobileFlipHorizontal === 'boolean'
-          ? parsed.mobileFlipHorizontal
-          : DEFAULT_SETTINGS.mobileFlipHorizontal,
+      mobileRotateClockwise:
+        typeof parsed.mobileRotateClockwise === 'boolean'
+          ? parsed.mobileRotateClockwise
+          : typeof parsedWithLegacy.mobileFlipHorizontal === 'boolean'
+            ? parsedWithLegacy.mobileFlipHorizontal
+            : DEFAULT_SETTINGS.mobileRotateClockwise,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

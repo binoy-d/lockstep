@@ -59,6 +59,40 @@ function readCssPxVariable(name: string): number {
   return Math.max(0, parsed);
 }
 
+function isMouseLikeEvent(event: Event): event is MouseEvent {
+  const candidate = event as MouseEvent;
+  return typeof candidate.clientX === 'number' && typeof candidate.clientY === 'number';
+}
+
+function isTouchLikeEvent(event: Event): event is TouchEvent {
+  const candidate = event as TouchEvent;
+  return typeof candidate.changedTouches !== 'undefined';
+}
+
+function getPointerClientPosition(pointer: Phaser.Input.Pointer): { x: number; y: number } {
+  const sourceEvent = pointer.event as Event | undefined;
+  if (sourceEvent) {
+    if (isMouseLikeEvent(sourceEvent)) {
+      return {
+        x: sourceEvent.clientX,
+        y: sourceEvent.clientY,
+      };
+    }
+
+    if (isTouchLikeEvent(sourceEvent) && sourceEvent.changedTouches.length > 0) {
+      return {
+        x: sourceEvent.changedTouches[0].clientX,
+        y: sourceEvent.changedTouches[0].clientY,
+      };
+    }
+  }
+
+  return {
+    x: pointer.x,
+    y: pointer.y,
+  };
+}
+
 class PuzzleScene extends Phaser.Scene {
   private readonly controller: GameController;
 
@@ -229,9 +263,10 @@ class PuzzleScene extends Phaser.Scene {
         return;
       }
 
+      const { x, y } = getPointerClientPosition(pointer);
       this.swipeStart = {
-        x: pointer.x,
-        y: pointer.y,
+        x,
+        y,
         pointerId: pointer.id,
         startedAtMs: performance.now(),
       };
@@ -243,8 +278,9 @@ class PuzzleScene extends Phaser.Scene {
       }
 
       const elapsedMs = performance.now() - this.swipeStart.startedAtMs;
-      const dx = pointer.x - this.swipeStart.x;
-      const dy = pointer.y - this.swipeStart.y;
+      const { x, y } = getPointerClientPosition(pointer);
+      const dx = x - this.swipeStart.x;
+      const dy = y - this.swipeStart.y;
       this.swipeStart = null;
 
       if (elapsedMs > 700) {
@@ -264,18 +300,22 @@ class PuzzleScene extends Phaser.Scene {
 
   private mapDirectionForSettings(direction: Direction): Direction {
     const settings = this.controller.getSnapshot().settings;
-    if (!settings.mobileFlipHorizontal) {
+    if (!settings.mobileRotateClockwise) {
       return direction;
     }
 
-    if (direction === 'left') {
-      return 'right';
+    switch (direction) {
+      case 'up':
+        return 'left';
+      case 'down':
+        return 'right';
+      case 'left':
+        return 'up';
+      case 'right':
+        return 'down';
+      default:
+        return direction;
     }
-    if (direction === 'right') {
-      return 'left';
-    }
-
-    return direction;
   }
 
   private queueDirectionWithSettings(direction: Direction): void {

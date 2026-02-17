@@ -1,21 +1,35 @@
 import { createServer } from 'node:http';
 import { URL } from 'node:url';
-import { ADMIN_PASSWORD, API_SESSION_SECRET, DEFAULT_PORT, DB_PATH, PUBLIC_ORIGIN } from './config.mjs';
+import { API_SESSION_SECRET, DEFAULT_PORT, DB_PATH, PUBLIC_ORIGIN } from './config.mjs';
 import { createDatabase } from './db.mjs';
+import { hashPassword, verifyPassword } from './passwords.mjs';
 import { issueSession, parseCookies, verifySessionToken } from './security.mjs';
 import {
   validateDeleteLevelPayload,
   validateLevelPayload,
   validateLevelId,
+  validateLoginPayload,
+  validateProgressPayload,
+  validateRegisterPayload,
   validateScorePayload,
+  validateUsername,
 } from './validation.mjs';
 
 const db = createDatabase(DB_PATH);
 const SESSION_COOKIE = '__Host-lockstep_session';
 const SCORE_RATE_LIMIT_WINDOW_MS = 60_000;
 const SCORE_RATE_LIMIT_MAX = 45;
-const scoreRateBuckets = new Map();
 const DEV_ALLOWED_ORIGINS = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
+const scoreRateBuckets = new Map();
+
+function asPublicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    playerName: user.playerName,
+    isAdmin: Boolean(user.isAdmin),
+  };
+}
 
 function getClientIp(req) {
   const cfIp = req.headers['cf-connecting-ip'];
@@ -69,29 +83,6 @@ function isRateLimited(key) {
   return false;
 }
 
-function requireAuthenticatedWrite(req, res) {
-  if (!isTrustedOrigin(req)) {
-    sendJson(req, res, 403, { error: 'Request origin is not allowed.' });
-    return null;
-  }
-
-  const cookies = parseCookies(req.headers.cookie);
-  const sessionToken = cookies.get(SESSION_COOKIE);
-  const session = verifySessionToken(sessionToken, API_SESSION_SECRET);
-  if (!session) {
-    sendJson(req, res, 401, { error: 'Missing or expired API session.' });
-    return null;
-  }
-
-  const csrfHeader = req.headers['x-lockstep-csrf'];
-  if (typeof csrfHeader !== 'string' || csrfHeader !== session.csrfToken) {
-    sendJson(req, res, 403, { error: 'Invalid CSRF token.' });
-    return null;
-  }
-
-  return session;
-}
-
 function sendJson(req, res, statusCode, payload, headers = {}) {
   res.writeHead(
     statusCode,
@@ -112,6 +103,88 @@ function notFound(req, res) {
   sendJson(req, res, 404, { error: 'Not found' });
 }
 
+function readSessionFromCookie(req) {
+  const cookies = parseCookies(req.headers.cookie);
+  return verifySessionToken(cookies.get(SESSION_COOKIE), API_SESSION_SECRET);
+}
+
+function issueSessionResponse(req, res, userId, statusCode = 200, payload = {}) {
+  const requestedUserId = Number.isInteger(userId) && userId > 0 ? userId : null;
+  const user = requestedUserId ? db.getUserById(requestedUserId) : null;
+  const session = issueSession(API_SESSION_SECRET, { userId: user ? requestedUserId : null });
+  const maxAgeSeconds = Math.max(1, Math.floor((session.expiresAtMs - Date.now()) / 1000));
+  sendJson(
+    req,
+    res,
+    statusCode,
+    {
+      csrfToken: session.csrfToken,
+      expiresAtMs: session.expiresAtMs,
+      authenticated: Boolean(user),
+      user: user ? asPublicUser(user) : null,
+      ...payload,
+    },
+    {
+      'Cache-Control': 'no-store',
+      'Set-Cookie': `${SESSION_COOKIE}=${session.token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeSeconds}`,
+    },
+  );
+}
+
+function requireAuthenticatedRead(req, res) {
+  if (!isTrustedOrigin(req)) {
+    sendJson(req, res, 403, { error: 'Request origin is not allowed.' });
+    return null;
+  }
+
+  const session = readSessionFromCookie(req);
+  if (!session) {
+    sendJson(req, res, 401, { error: 'Missing or expired API session.' });
+    return null;
+  }
+
+  return session;
+}
+
+function requireAuthenticatedWrite(req, res) {
+  const session = requireAuthenticatedRead(req, res);
+  if (!session) {
+    return null;
+  }
+
+  const csrfHeader = req.headers['x-lockstep-csrf'];
+  if (typeof csrfHeader !== 'string' || csrfHeader !== session.csrfToken) {
+    sendJson(req, res, 403, { error: 'Invalid CSRF token.' });
+    return null;
+  }
+
+  return session;
+}
+
+function requireAccount(req, res, options = {}) {
+  const requireCsrf = options.requireCsrf !== false;
+  const session = requireCsrf ? requireAuthenticatedWrite(req, res) : requireAuthenticatedRead(req, res);
+  if (!session) {
+    return null;
+  }
+
+  if (!session.userId) {
+    sendJson(req, res, 401, { error: 'Sign in required.' });
+    return null;
+  }
+
+  const user = db.getUserById(session.userId);
+  if (!user) {
+    sendJson(req, res, 401, { error: 'Session user no longer exists.' });
+    return null;
+  }
+
+  return {
+    session,
+    user,
+  };
+}
+
 async function readJsonBody(req) {
   const chunks = [];
   for await (const chunk of req) {
@@ -122,8 +195,7 @@ async function readJsonBody(req) {
     return {};
   }
 
-  const text = Buffer.concat(chunks).toString('utf8');
-  return JSON.parse(text);
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 const server = createServer(async (req, res) => {
@@ -152,21 +224,110 @@ const server = createServer(async (req, res) => {
         return;
       }
 
-      const session = issueSession(API_SESSION_SECRET);
-      const maxAgeSeconds = Math.max(1, Math.floor((session.expiresAtMs - Date.now()) / 1000));
-      sendJson(
-        req,
-        res,
-        200,
-        {
-          csrfToken: session.csrfToken,
-          expiresAtMs: session.expiresAtMs,
-        },
-        {
-          'Cache-Control': 'no-store',
-          'Set-Cookie': `${SESSION_COOKIE}=${session.token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeSeconds}`,
-        },
-      );
+      const existing = readSessionFromCookie(req);
+      issueSessionResponse(req, res, existing?.userId ?? null);
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/auth/me') {
+      if (!isTrustedOrigin(req)) {
+        sendJson(req, res, 403, { error: 'Request origin is not allowed.' });
+        return;
+      }
+
+      const session = readSessionFromCookie(req);
+      if (!session?.userId) {
+        sendJson(req, res, 200, { authenticated: false, user: null });
+        return;
+      }
+
+      const user = db.getUserById(session.userId);
+      if (!user) {
+        sendJson(req, res, 200, { authenticated: false, user: null });
+        return;
+      }
+
+      sendJson(req, res, 200, { authenticated: true, user: asPublicUser(user) });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/auth/register') {
+      if (!requireAuthenticatedWrite(req, res)) {
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      const payload = validateRegisterPayload(body);
+      const passwordHash = hashPassword(payload.password);
+
+      let user;
+      try {
+        user = db.createUser({
+          username: payload.username,
+          passwordHash,
+          playerName: payload.playerName,
+          isAdmin: false,
+        });
+      } catch (error) {
+        if (error instanceof Error && /UNIQUE constraint failed: users\.username/i.test(error.message)) {
+          sendJson(req, res, 409, { error: 'Username is already taken.' });
+          return;
+        }
+
+        throw error;
+      }
+
+      issueSessionResponse(req, res, user.id, 201);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/auth/login') {
+      if (!requireAuthenticatedWrite(req, res)) {
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      const payload = validateLoginPayload(body);
+      const user = db.getUserByUsername(payload.username);
+      if (!user || !verifyPassword(payload.password, user.passwordHash)) {
+        sendJson(req, res, 401, { error: 'Invalid username or password.' });
+        return;
+      }
+
+      issueSessionResponse(req, res, user.id);
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/auth/logout') {
+      if (!requireAuthenticatedWrite(req, res)) {
+        return;
+      }
+
+      issueSessionResponse(req, res, null);
+      return;
+    }
+
+    if (req.method === 'GET' && pathname === '/api/progress') {
+      const account = requireAccount(req, res, { requireCsrf: false });
+      if (!account) {
+        return;
+      }
+
+      const progress = db.getUserProgress(account.user.id);
+      sendJson(req, res, 200, { progress });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/progress') {
+      const account = requireAccount(req, res);
+      if (!account) {
+        return;
+      }
+
+      const body = await readJsonBody(req);
+      const payload = validateProgressPayload(body);
+      const progress = db.saveUserProgress(account.user.id, payload.selectedLevelId);
+      sendJson(req, res, 200, { progress });
       return;
     }
 
@@ -176,36 +337,60 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && pathname === '/api/levels') {
-      if (!requireAuthenticatedWrite(req, res)) {
+      const account = requireAccount(req, res);
+      if (!account) {
         return;
       }
 
       const body = await readJsonBody(req);
       const payload = validateLevelPayload(body);
-      const saved = db.upsertLevel(payload);
+      const existing = db.getLevel(payload.id);
+      const userId = account.user.id;
+      const isAdmin = Boolean(account.user.isAdmin);
+
+      if (existing) {
+        if (existing.ownerUserId === null && !isAdmin) {
+          sendJson(req, res, 403, { error: 'Only admins can claim legacy unowned levels.' });
+          return;
+        }
+
+        if (existing.ownerUserId !== null && existing.ownerUserId !== userId && !isAdmin) {
+          sendJson(req, res, 403, { error: 'Only the level owner or an admin can edit this level.' });
+          return;
+        }
+      }
+
+      const ownerUserId = existing?.ownerUserId ?? userId;
+      const saved = db.upsertLevel({
+        ...payload,
+        authorName: account.user.playerName,
+        ownerUserId,
+      });
       sendJson(req, res, 200, { level: saved });
       return;
     }
 
     if (req.method === 'POST' && pathname === '/api/admin/delete-level') {
-      if (!requireAuthenticatedWrite(req, res)) {
+      const account = requireAccount(req, res);
+      if (!account) {
         return;
       }
 
       const body = await readJsonBody(req);
       const payload = validateDeleteLevelPayload(body);
-
-      if (payload.password !== ADMIN_PASSWORD) {
-        sendJson(req, res, 403, { error: 'Invalid admin password.' });
-        return;
-      }
-
-      const deleted = db.deleteLevel(payload.levelId);
-      if (!deleted) {
+      const existing = db.getLevel(payload.levelId);
+      if (!existing) {
         sendJson(req, res, 404, { error: `Level ${payload.levelId} not found.` });
         return;
       }
 
+      const isAdmin = Boolean(account.user.isAdmin);
+      if (!isAdmin && existing.ownerUserId !== account.user.id) {
+        sendJson(req, res, 403, { error: 'Only the level owner or an admin can delete this level.' });
+        return;
+      }
+
+      db.deleteLevel(payload.levelId);
       sendJson(req, res, 200, { ok: true, levelId: payload.levelId });
       return;
     }
@@ -231,6 +416,16 @@ const server = createServer(async (req, res) => {
 
       const body = await readJsonBody(req);
       const payload = validateScorePayload(body);
+      if (session.userId) {
+        const user = db.getUserById(session.userId);
+        if (!user) {
+          sendJson(req, res, 401, { error: 'Session user no longer exists.' });
+          return;
+        }
+
+        payload.playerName = user.playerName;
+      }
+
       db.insertScore(payload);
       const scores = db.getTopScores(payload.levelId, 10);
       sendJson(req, res, 201, { levelId: payload.levelId, scores });
@@ -239,11 +434,43 @@ const server = createServer(async (req, res) => {
 
     notFound(req, res);
   } catch (error) {
+    if (error instanceof Error && /no such table/i.test(error.message)) {
+      sendJson(req, res, 500, { error: 'Database schema error.' });
+      return;
+    }
+
     sendJson(req, res, 400, {
       error: error instanceof Error ? error.message : 'Invalid request',
     });
   }
 });
+
+function ensureAdminAccount(username, password, playerName = username) {
+  const normalizedUsername = validateUsername(username);
+  const existing = db.getUserByUsername(normalizedUsername);
+  if (!existing) {
+    const created = db.createUser({
+      username: normalizedUsername,
+      passwordHash: hashPassword(password),
+      playerName,
+      isAdmin: true,
+    });
+    db.assignUnownedLevelsToUser(created.id);
+    return;
+  }
+
+  if (!existing.isAdmin) {
+    db.setUserAdmin(existing.id, true);
+  }
+
+  if (!verifyPassword(password, existing.passwordHash) || existing.playerName !== playerName) {
+    db.updateUserCredentials(existing.id, hashPassword(password), playerName);
+  }
+
+  db.assignUnownedLevelsToUser(existing.id);
+}
+
+ensureAdminAccount('admin', 'yeahimthegoat', 'admin');
 
 server.listen(DEFAULT_PORT, () => {
   console.log(`Backend listening on http://localhost:${DEFAULT_PORT}`);

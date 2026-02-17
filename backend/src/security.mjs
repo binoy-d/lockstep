@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
-const SESSION_TTL_MS = 1000 * 60 * 60 * 8;
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
 
 function toBase64Url(input) {
   return Buffer.from(input).toString('base64url');
@@ -36,11 +36,13 @@ export function parseCookies(cookieHeader) {
   return new Map(entries);
 }
 
-export function issueSession(secret) {
+export function issueSession(secret, options = {}) {
   const now = Date.now();
+  const userId = Number.isInteger(options.userId) && options.userId > 0 ? options.userId : null;
   const payload = {
     sid: randomBytes(18).toString('base64url'),
     csrf: randomBytes(18).toString('base64url'),
+    uid: userId,
     iat: now,
     exp: now + SESSION_TTL_MS,
   };
@@ -51,6 +53,7 @@ export function issueSession(secret) {
     token: `${payloadBase64}.${signature}`,
     csrfToken: payload.csrf,
     sessionId: payload.sid,
+    userId: payload.uid,
     expiresAtMs: payload.exp,
   };
 }
@@ -88,9 +91,12 @@ export function verifySessionToken(token, secret) {
       return null;
     }
 
+    const normalizedUserId = parsed.uid === undefined ? null : parsed.uid;
+
     if (
       typeof parsed.sid !== 'string' ||
       typeof parsed.csrf !== 'string' ||
+      (normalizedUserId !== null && (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0)) ||
       typeof parsed.iat !== 'number' ||
       typeof parsed.exp !== 'number'
     ) {
@@ -104,6 +110,7 @@ export function verifySessionToken(token, secret) {
     return {
       sessionId: parsed.sid,
       csrfToken: parsed.csrf,
+      userId: normalizedUserId,
       issuedAtMs: parsed.iat,
       expiresAtMs: parsed.exp,
     };

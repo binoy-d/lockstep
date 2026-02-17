@@ -14,7 +14,19 @@ import {
   shouldPaintOnHover,
   validateGridForEditor,
 } from '../editor/levelEditorUtils';
-import { deleteCustomLevel, fetchTopScores, saveCustomLevel, type LevelScoreRecord } from '../runtime/backendApi';
+import {
+  deleteCustomLevel,
+  fetchTopScores,
+  fetchUserProgress,
+  initializeApiSession,
+  loginAccount,
+  logoutAccount,
+  registerAccount,
+  saveCustomLevel,
+  saveUserProgress,
+  type AuthState,
+  type LevelScoreRecord,
+} from '../runtime/backendApi';
 import { isTextInputFocused } from '../runtime/inputFocus';
 import { getLevelLabel } from '../runtime/levelMeta';
 import { LockstepIntroCinematic } from './introCinematic';
@@ -106,6 +118,14 @@ function isLikelyMobileDevice(): boolean {
   return hasCoarsePointer || hasMobileUserAgent || hasTouch;
 }
 
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
 export class OverlayUI {
   private readonly root: HTMLElement;
 
@@ -152,6 +172,22 @@ export class OverlayUI {
   private readonly introPlayerNameInput: HTMLInputElement;
 
   private readonly introCurrentLevelText: HTMLElement;
+
+  private readonly accountStatus: HTMLElement;
+
+  private readonly accountFeedback: HTMLElement;
+
+  private readonly accountUsernameInput: HTMLInputElement;
+
+  private readonly accountPasswordInput: HTMLInputElement;
+
+  private readonly accountPlayerNameInput: HTMLInputElement;
+
+  private readonly accountLoginButton: HTMLButtonElement;
+
+  private readonly accountRegisterButton: HTMLButtonElement;
+
+  private readonly accountLogoutButton: HTMLButtonElement;
 
   private readonly introSettingsPanel: HTMLElement;
 
@@ -215,6 +251,14 @@ export class OverlayUI {
 
   private readonly isMobileDevice: boolean;
 
+  private authState: AuthState = { authenticated: false, user: null };
+
+  private authBusy = false;
+
+  private lastSavedProgressLevelId: string | null = null;
+
+  private pendingProgressLevelId: string | null = null;
+
   private editorPaletteButtons = new Map<string, HTMLButtonElement>();
 
   private editorGrid: string[][] = this.createBlankGrid(25, 16);
@@ -261,6 +305,14 @@ export class OverlayUI {
     this.introLevelSelectButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select');
     this.introPlayerNameInput = asElement<HTMLInputElement>(this.root, '#intro-player-name-input');
     this.introCurrentLevelText = asElement<HTMLElement>(this.root, '#intro-current-level');
+    this.accountStatus = asElement<HTMLElement>(this.root, '#account-status');
+    this.accountFeedback = asElement<HTMLElement>(this.root, '#account-feedback');
+    this.accountUsernameInput = asElement<HTMLInputElement>(this.root, '#account-username-input');
+    this.accountPasswordInput = asElement<HTMLInputElement>(this.root, '#account-password-input');
+    this.accountPlayerNameInput = asElement<HTMLInputElement>(this.root, '#account-player-name-input');
+    this.accountLoginButton = asElement<HTMLButtonElement>(this.root, '#btn-account-login');
+    this.accountRegisterButton = asElement<HTMLButtonElement>(this.root, '#btn-account-register');
+    this.accountLogoutButton = asElement<HTMLButtonElement>(this.root, '#btn-account-logout');
     this.introSettingsPanel = asElement<HTMLElement>(this.root, '#intro-settings-panel');
     this.introSettingsButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-settings-toggle');
     this.introSettingsCloseButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-settings-close');
@@ -330,6 +382,7 @@ export class OverlayUI {
     this.renderEditorGrid();
     this.bindEvents();
     this.controller.subscribe((snapshot) => this.render(snapshot));
+    void this.initializeAccountState();
   }
 
   private buildMarkup(): string {
@@ -358,7 +411,7 @@ export class OverlayUI {
             </label>
             <label class="checkbox-row" data-mobile-only>
               <input id="intro-settings-mobile-flip" type="checkbox" />
-              Flip screen horizontally
+              Rotate board 90 deg clockwise
             </label>
             <button type="button" id="btn-intro-settings-close">Done</button>
           </div>
@@ -373,12 +426,37 @@ export class OverlayUI {
             <h2>Enter Lockstep</h2>
             <label for="intro-player-name-input">Player Name</label>
             <input id="intro-player-name-input" type="text" maxlength="32" placeholder="Enter your name" />
+            <section class="account-panel">
+              <h3>Account</h3>
+              <p class="account-status" id="account-status" aria-live="polite">Not signed in.</p>
+              <label for="account-username-input">Username</label>
+              <input
+                id="account-username-input"
+                type="text"
+                maxlength="24"
+                placeholder="lowercase_username"
+                autocapitalize="none"
+                spellcheck="false"
+              />
+              <label for="account-password-input">Password</label>
+              <input id="account-password-input" type="password" maxlength="128" placeholder="password" />
+              <label for="account-player-name-input">Player Name (optional for register)</label>
+              <input id="account-player-name-input" type="text" maxlength="32" placeholder="Defaults to username" />
+              <div class="button-row account-button-row">
+                <button type="button" id="btn-account-login">Sign In</button>
+                <button type="button" id="btn-account-register">Register</button>
+                <button type="button" id="btn-account-logout">Sign Out</button>
+              </div>
+              <p class="account-feedback" id="account-feedback" aria-live="polite">
+                Publish levels and save progress with an account.
+              </p>
+            </section>
             <div class="intro-level-readout">
               Current Level
               <strong id="intro-current-level">Level 1</strong>
             </div>
             <p class="intro-level-hint">Press <kbd>ESC</kbd> in-game to open Level Select.</p>
-            <p class="intro-level-hint" data-mobile-only>Mobile: swipe anywhere to move. Use Flip in settings.</p>
+            <p class="intro-level-hint" data-mobile-only>Mobile: swipe anywhere to move. Use Rotate in settings.</p>
           </div>
           <div class="button-row intro-button-row">
             <button type="button" id="btn-intro-start">Start</button>
@@ -389,10 +467,10 @@ export class OverlayUI {
 
       <div class="menu-status" id="menu-status" aria-live="polite"></div>
       <div class="mobile-swipe-hint" id="mobile-swipe-hint" data-mobile-only hidden>
-        Swipe anywhere to move. Use Flip if left/right feels reversed.
+        Swipe anywhere to move. Use Rotate if you want landscape play.
       </div>
       <button type="button" class="mobile-flip-fab" id="btn-mobile-flip-fab" data-mobile-only hidden>
-        Flip: Off
+        Rotate: Off
       </button>
       <aside class="hud-scoreboard" id="hud-scoreboard" hidden>
         <h3>High Scores</h3>
@@ -463,7 +541,7 @@ export class OverlayUI {
         </label>
         <label class="checkbox-row" data-mobile-only>
           <input id="settings-mobile-flip" type="checkbox" />
-          Flip screen horizontally
+          Rotate board 90 deg clockwise
         </label>
 
         <div class="button-row">
@@ -554,6 +632,34 @@ export class OverlayUI {
     asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select').addEventListener('click', () => {
       this.closeIntroSettings();
       this.openLevelSelectFromMenu();
+    });
+
+    this.accountLoginButton.addEventListener('click', () => {
+      void this.signInAccount();
+    });
+
+    this.accountRegisterButton.addEventListener('click', () => {
+      void this.registerNewAccount();
+    });
+
+    this.accountLogoutButton.addEventListener('click', () => {
+      void this.signOutAccount();
+    });
+
+    const refreshAccountForm = () => {
+      this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+    };
+    this.accountUsernameInput.addEventListener('input', refreshAccountForm);
+    this.accountPasswordInput.addEventListener('input', refreshAccountForm);
+    this.accountPlayerNameInput.addEventListener('input', refreshAccountForm);
+
+    this.accountPasswordInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+
+      event.preventDefault();
+      void this.signInAccount();
     });
 
     this.introSettingsButton.addEventListener('click', () => {
@@ -721,16 +827,16 @@ export class OverlayUI {
     });
 
     this.mobileFlipToggle.addEventListener('change', () => {
-      this.controller.setMobileFlipHorizontal(this.mobileFlipToggle.checked);
+      this.controller.setMobileRotateClockwise(this.mobileFlipToggle.checked);
     });
 
     this.introMobileFlipToggle.addEventListener('change', () => {
-      this.controller.setMobileFlipHorizontal(this.introMobileFlipToggle.checked);
+      this.controller.setMobileRotateClockwise(this.introMobileFlipToggle.checked);
     });
 
     this.mobileFlipFab.addEventListener('click', () => {
-      const current = this.controller.getSnapshot().settings.mobileFlipHorizontal;
-      this.controller.setMobileFlipHorizontal(!current);
+      const current = this.controller.getSnapshot().settings.mobileRotateClockwise;
+      this.controller.setMobileRotateClockwise(!current);
     });
 
     this.editorGridRoot.addEventListener('pointerdown', (event) => {
@@ -820,6 +926,214 @@ export class OverlayUI {
     });
   }
 
+  private async initializeAccountState(): Promise<void> {
+    try {
+      const state = await initializeApiSession();
+      this.applyAuthState(state);
+      if (state.authenticated) {
+        await this.loadSavedProgressForAccount();
+        this.setAccountFeedback(`Signed in as @${state.user?.username}.`);
+      }
+    } catch (error) {
+      this.setAccountFeedback(`Account service unavailable: ${formatError(error)}`, true);
+    }
+  }
+
+  private applyAuthState(state: AuthState): void {
+    this.authState = state;
+    this.lastSavedProgressLevelId = null;
+    this.pendingProgressLevelId = null;
+
+    if (state.authenticated && state.user) {
+      this.controller.setPlayerName(state.user.playerName);
+      this.accountUsernameInput.value = state.user.username;
+      this.accountPlayerNameInput.value = state.user.playerName;
+    }
+
+    this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+  }
+
+  private refreshAccountUi(snapshot: ControllerSnapshot): void {
+    const signedIn = Boolean(this.authState.authenticated && this.authState.user);
+    const user = this.authState.user;
+    this.accountStatus.textContent = signedIn
+      ? `Signed in: @${user?.username}${user?.isAdmin ? ' (admin)' : ''}`
+      : 'Not signed in.';
+
+    const hasCredentials =
+      this.accountUsernameInput.value.trim().length > 0 && this.accountPasswordInput.value.length > 0;
+    this.accountUsernameInput.disabled = this.authBusy || signedIn;
+    this.accountPasswordInput.disabled = this.authBusy || signedIn;
+    this.accountPlayerNameInput.disabled = this.authBusy || signedIn;
+    this.accountLoginButton.disabled = this.authBusy || signedIn || !hasCredentials;
+    this.accountRegisterButton.disabled = this.authBusy || signedIn || !hasCredentials;
+    this.accountLogoutButton.disabled = this.authBusy || !signedIn;
+
+    const lockPlayerName = signedIn;
+    this.playerNameInput.disabled = lockPlayerName;
+    this.introPlayerNameInput.disabled = lockPlayerName;
+    this.editorPlayerNameInput.disabled = lockPlayerName;
+    this.playerNameInput.title = lockPlayerName ? 'Player name is managed by your account.' : '';
+    this.introPlayerNameInput.title = lockPlayerName ? 'Player name is managed by your account.' : '';
+    this.editorPlayerNameInput.title = lockPlayerName ? 'Player name is managed by your account.' : '';
+
+    const canPublish = signedIn;
+    this.editorSaveButton.disabled = !canPublish;
+    this.editorDeleteButton.disabled = !canPublish;
+    this.editorSaveButton.title = canPublish ? 'Publish this level' : 'Sign in to publish levels.';
+    this.editorDeleteButton.title = canPublish ? 'Delete a published level you own (or any as admin)' : 'Sign in to delete published levels.';
+
+    if (!signedIn && snapshot.playerName.trim().length > 0 && this.accountPlayerNameInput.value.length === 0) {
+      this.accountPlayerNameInput.value = snapshot.playerName;
+    }
+  }
+
+  private setAccountFeedback(message: string, isError = false): void {
+    this.accountFeedback.textContent = message;
+    this.accountFeedback.classList.toggle('account-feedback-error', isError);
+  }
+
+  private async loadSavedProgressForAccount(): Promise<void> {
+    if (!this.authState.authenticated || !this.authState.user) {
+      return;
+    }
+
+    try {
+      const progress = await fetchUserProgress();
+      if (!progress) {
+        return;
+      }
+
+      this.lastSavedProgressLevelId = progress.selectedLevelId;
+      const snapshot = this.controller.getSnapshot();
+      const levelIndex = snapshot.levels.findIndex((level) => level.id === progress.selectedLevelId);
+      if (levelIndex >= 0 && levelIndex !== snapshot.selectedLevelIndex) {
+        this.controller.setSelectedLevel(levelIndex);
+        this.setAccountFeedback(`Loaded saved level ${progress.selectedLevelId}.`);
+      }
+    } catch (error) {
+      this.setAccountFeedback(`Unable to load saved progress: ${formatError(error)}`, true);
+    }
+  }
+
+  private syncSavedProgress(snapshot: ControllerSnapshot): void {
+    if (!this.authState.authenticated || !this.authState.user) {
+      return;
+    }
+
+    const selectedLevel = snapshot.levels[snapshot.selectedLevelIndex];
+    if (!selectedLevel) {
+      return;
+    }
+
+    const selectedLevelId = selectedLevel.id;
+    if (selectedLevelId.startsWith(EDITOR_TEST_LEVEL_ID)) {
+      return;
+    }
+
+    if (selectedLevelId === this.lastSavedProgressLevelId || selectedLevelId === this.pendingProgressLevelId) {
+      return;
+    }
+
+    this.pendingProgressLevelId = selectedLevelId;
+    void saveUserProgress(selectedLevelId)
+      .then((saved) => {
+        if (this.pendingProgressLevelId === selectedLevelId) {
+          this.pendingProgressLevelId = null;
+        }
+        this.lastSavedProgressLevelId = saved.selectedLevelId;
+      })
+      .catch(() => {
+        if (this.pendingProgressLevelId === selectedLevelId) {
+          this.pendingProgressLevelId = null;
+        }
+      });
+  }
+
+  private async registerNewAccount(): Promise<void> {
+    if (this.authBusy || this.authState.authenticated) {
+      return;
+    }
+
+    const username = this.accountUsernameInput.value.trim().toLowerCase();
+    const password = this.accountPasswordInput.value;
+    const playerName = this.accountPlayerNameInput.value.trim();
+    if (!username || !password) {
+      this.setAccountFeedback('Enter username and password to register.', true);
+      return;
+    }
+
+    this.authBusy = true;
+    this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+
+    try {
+      const state = await registerAccount({
+        username,
+        password,
+        ...(playerName.length > 0 ? { playerName } : {}),
+      });
+      this.accountPasswordInput.value = '';
+      this.applyAuthState(state);
+      await this.loadSavedProgressForAccount();
+      this.setAccountFeedback(`Account created. Signed in as @${state.user?.username}.`);
+    } catch (error) {
+      this.setAccountFeedback(`Register failed: ${formatError(error)}`, true);
+    } finally {
+      this.authBusy = false;
+      this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+    }
+  }
+
+  private async signInAccount(): Promise<void> {
+    if (this.authBusy || this.authState.authenticated) {
+      return;
+    }
+
+    const username = this.accountUsernameInput.value.trim().toLowerCase();
+    const password = this.accountPasswordInput.value;
+    if (!username || !password) {
+      this.setAccountFeedback('Enter username and password to sign in.', true);
+      return;
+    }
+
+    this.authBusy = true;
+    this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+
+    try {
+      const state = await loginAccount({ username, password });
+      this.accountPasswordInput.value = '';
+      this.applyAuthState(state);
+      await this.loadSavedProgressForAccount();
+      this.setAccountFeedback(`Signed in as @${state.user?.username}.`);
+    } catch (error) {
+      this.setAccountFeedback(`Sign-in failed: ${formatError(error)}`, true);
+    } finally {
+      this.authBusy = false;
+      this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+    }
+  }
+
+  private async signOutAccount(): Promise<void> {
+    if (this.authBusy || !this.authState.authenticated) {
+      return;
+    }
+
+    this.authBusy = true;
+    this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+
+    try {
+      const state = await logoutAccount();
+      this.accountPasswordInput.value = '';
+      this.applyAuthState(state);
+      this.setAccountFeedback('Signed out.');
+    } catch (error) {
+      this.setAccountFeedback(`Sign-out failed: ${formatError(error)}`, true);
+    } finally {
+      this.authBusy = false;
+      this.refreshAccountUi(this.lastSnapshot ?? this.controller.getSnapshot());
+    }
+  }
+
   private startFromIntro(): void {
     const nextName = this.introPlayerNameInput.value.trim();
     this.controller.setPlayerName(nextName);
@@ -873,8 +1187,8 @@ export class OverlayUI {
     this.introCameraSwayToggle.checked = snapshot.settings.cameraSwayEnabled;
     this.showFpsToggle.checked = snapshot.settings.showFps;
     this.introShowFpsToggle.checked = snapshot.settings.showFps;
-    this.mobileFlipToggle.checked = snapshot.settings.mobileFlipHorizontal;
-    this.introMobileFlipToggle.checked = snapshot.settings.mobileFlipHorizontal;
+    this.mobileFlipToggle.checked = snapshot.settings.mobileRotateClockwise;
+    this.introMobileFlipToggle.checked = snapshot.settings.mobileRotateClockwise;
     this.statusText.textContent = snapshot.statusMessage ?? '';
     const currentLevel = snapshot.levels[snapshot.selectedLevelIndex];
     if (currentLevel) {
@@ -890,16 +1204,14 @@ export class OverlayUI {
     this.introStartButton.disabled = !canPlay;
     this.introLevelSelectButton.disabled = !canPlay;
     this.pauseLevelSelectButton.disabled = !canPlay;
-    this.editorSaveButton.disabled = !canPlay;
-    this.editorSavePlayButton.disabled = !canPlay;
-    this.editorDeleteButton.disabled = false;
+    this.editorSavePlayButton.disabled = false;
     this.pauseTestBackButton.hidden = !this.editorTestingPublishLevelId;
     const showMobileGameUi =
       this.isMobileDevice &&
       canPlay &&
       (snapshot.screen === 'playing' || snapshot.screen === 'paused' || snapshot.screen === 'level-select');
     this.mobileFlipFab.hidden = !showMobileGameUi;
-    this.mobileFlipFab.textContent = snapshot.settings.mobileFlipHorizontal ? 'Flip: On' : 'Flip: Off';
+    this.mobileFlipFab.textContent = snapshot.settings.mobileRotateClockwise ? 'Rotate: On' : 'Rotate: Off';
     const showSwipeHint = this.isMobileDevice && snapshot.screen === 'playing' && snapshot.gameState.moves === 0;
     this.mobileSwipeHint.hidden = !showSwipeHint;
 
@@ -959,6 +1271,9 @@ export class OverlayUI {
       void this.loadScoresForSelectedLevel(false);
     }
 
+    this.refreshAccountUi(snapshot);
+    this.syncSavedProgress(snapshot);
+
     if (snapshot.screen === 'playing' || snapshot.screen === 'paused') {
       const currentLevelId = snapshot.gameState.levelId;
       if (this.lastRenderedHudLevelId !== currentLevelId) {
@@ -977,8 +1292,8 @@ export class OverlayUI {
       gameShell.classList.toggle('editor-screen-active', snapshot.screen === 'editor');
       gameShell.classList.toggle('level-select-screen-active', snapshot.screen === 'level-select');
       gameShell.classList.toggle(
-        'mobile-flip-horizontal',
-        this.isMobileDevice && snapshot.settings.mobileFlipHorizontal,
+        'mobile-rotate-clockwise',
+        this.isMobileDevice && snapshot.settings.mobileRotateClockwise,
       );
     }
     this.lastRenderedScreen = snapshot.screen;
@@ -1310,7 +1625,11 @@ export class OverlayUI {
     this.editorIdInput.value = this.defaultEditorId();
     this.renderEditorGrid();
     this.controller.openEditor();
-    this.showEditorFeedback(`Copied ${level.id}. Publish with a new level id.`);
+    this.showEditorFeedback(
+      this.authState.authenticated
+        ? `Copied ${level.id}. Publish with a new level id.`
+        : `Copied ${level.id}. Sign in to publish your copy.`,
+    );
   }
 
   private openEditorForBlankLevel(): void {
@@ -1320,7 +1639,9 @@ export class OverlayUI {
     this.editorIdInput.value = this.defaultEditorId();
     this.renderEditorGrid();
     this.controller.openEditor();
-    this.showEditorFeedback('Created blank level template.');
+    this.showEditorFeedback(
+      this.authState.authenticated ? 'Created blank level template.' : 'Created blank template. Sign in to publish.',
+    );
   }
 
   private resizeEditorGrid(): void {
@@ -1361,15 +1682,18 @@ export class OverlayUI {
     return publishId;
   }
 
-  private readEditorAuthorName(): string | null {
-    const authorName = this.controller.getPlayerName();
-    if (!authorName) {
-      this.showEditorFeedback('Enter a player name before testing or publishing levels.', true);
-      this.editorPlayerNameInput.focus();
-      return null;
+  private ensureEditorTestPlayerName(): void {
+    const existingName = this.controller.getPlayerName();
+    if (existingName) {
+      return;
     }
 
-    return authorName;
+    if (this.authState.authenticated && this.authState.user) {
+      this.controller.setPlayerName(this.authState.user.playerName);
+      return;
+    }
+
+    this.controller.setPlayerName('Guest');
   }
 
   private validateEditorGrid(): { errors: string[]; warnings: string[] } | null {
@@ -1388,9 +1712,7 @@ export class OverlayUI {
       return;
     }
 
-    if (!this.readEditorAuthorName()) {
-      return;
-    }
+    this.ensureEditorTestPlayerName();
 
     if (!this.validateEditorGrid()) {
       return;
@@ -1440,8 +1762,8 @@ export class OverlayUI {
       return;
     }
 
-    const authorName = this.readEditorAuthorName();
-    if (!authorName) {
+    if (!this.authState.authenticated || !this.authState.user) {
+      this.showEditorFeedback('Sign in to publish levels.', true);
       return;
     }
 
@@ -1466,7 +1788,6 @@ export class OverlayUI {
         id: levelId,
         name: levelId,
         text,
-        authorName,
       });
 
       const parsed = parseLevelText(saved.id, saved.text);
@@ -1482,20 +1803,20 @@ export class OverlayUI {
 
       this.showEditorFeedback(`Published ${saved.id} to backend.`);
     } catch (error) {
-      this.showEditorFeedback(`Publish failed: ${String(error)}`, true);
+      this.showEditorFeedback(`Publish failed: ${formatError(error)}`, true);
     }
   }
 
   private async deleteEditorLevel(): Promise<void> {
+    if (!this.authState.authenticated || !this.authState.user) {
+      this.showEditorFeedback('Sign in to delete published levels.', true);
+      return;
+    }
+
     const levelId = levelIdFromInput(this.editorIdInput.value);
     if (!levelId) {
       this.showEditorFeedback('Enter a level id to delete.', true);
       this.editorIdInput.focus();
-      return;
-    }
-
-    const password = window.prompt(`Admin password required to delete "${levelId}"`);
-    if (password === null) {
       return;
     }
 
@@ -1505,14 +1826,14 @@ export class OverlayUI {
     }
 
     try {
-      await deleteCustomLevel({ levelId, password });
+      await deleteCustomLevel({ levelId });
       this.scoreCache.delete(levelId);
       this.controller.removeLevel(levelId);
       this.editorLoadedLevelId = null;
       this.editorIdInput.value = this.defaultEditorId();
       this.showEditorFeedback(`Deleted ${levelId}.`);
     } catch (error) {
-      this.showEditorFeedback(`Delete failed: ${String(error)}`, true);
+      this.showEditorFeedback(`Delete failed: ${formatError(error)}`, true);
     }
   }
 

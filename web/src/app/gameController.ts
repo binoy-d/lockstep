@@ -472,13 +472,17 @@ export class GameController {
     this.emit();
   }
 
-  public setMobileFlipHorizontal(enabled: boolean): void {
+  public setMobileRotateClockwise(enabled: boolean): void {
     this.settings = {
       ...this.settings,
-      mobileFlipHorizontal: enabled,
+      mobileRotateClockwise: enabled,
     };
     saveSettings(this.settings);
     this.emit();
+  }
+
+  public setMobileFlipHorizontal(enabled: boolean): void {
+    this.setMobileRotateClockwise(enabled);
   }
 
   public isPlaying(): boolean {

@@ -1,12 +1,14 @@
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '/api';
 let csrfToken: string | null = null;
-let sessionRequest: Promise<void> | null = null;
+let sessionRequest: Promise<AuthState> | null = null;
 
 export interface BackendLevelRecord {
   id: string;
   name: string;
   text: string;
   authorName: string;
+  ownerUserId: number | null;
+  ownerUsername: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -18,15 +20,68 @@ export interface LevelScoreRecord {
   createdAt: number;
 }
 
+export interface AuthUserRecord {
+  id: number;
+  username: string;
+  playerName: string;
+  isAdmin: boolean;
+}
+
+export interface AuthState {
+  authenticated: boolean;
+  user: AuthUserRecord | null;
+}
+
+export interface AccountProgressRecord {
+  userId: number;
+  selectedLevelId: string;
+  updatedAt: number;
+}
+
 interface ErrorPayload {
   error?: string;
 }
 
-async function ensureApiSession(): Promise<void> {
-  if (csrfToken) {
+interface SessionPayload {
+  csrfToken?: string;
+  authenticated?: boolean;
+  user?: AuthUserRecord | null;
+}
+
+function parseAuthState(payload: SessionPayload | AuthState): AuthState {
+  const user = payload.user ?? null;
+  const authenticated = Boolean(payload.authenticated && user);
+  return {
+    authenticated,
+    user: authenticated ? user : null,
+  };
+}
+
+function updateCsrfTokenFromPayload(payload: unknown): void {
+  if (!payload || typeof payload !== 'object') {
     return;
   }
 
+  const csrf = (payload as { csrfToken?: unknown }).csrfToken;
+  if (typeof csrf === 'string' && csrf.length > 0) {
+    csrfToken = csrf;
+  }
+}
+
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  if (!text) {
+    return {} as T;
+  }
+
+  return JSON.parse(text) as T;
+}
+
+async function refreshApiSession(): Promise<AuthState> {
   if (!sessionRequest) {
     sessionRequest = (async () => {
       const response = await fetch(`${API_BASE}/auth/session`, {
@@ -42,18 +97,27 @@ async function ensureApiSession(): Promise<void> {
         throw new Error(`Unable to establish API session (HTTP ${response.status})`);
       }
 
-      const payload = (await response.json()) as { csrfToken?: string };
+      const payload = await parseJsonResponse<SessionPayload>(response);
       if (!payload.csrfToken) {
         throw new Error('Unable to establish API session (missing CSRF token).');
       }
 
       csrfToken = payload.csrfToken;
+      return parseAuthState(payload);
     })().finally(() => {
       sessionRequest = null;
     });
   }
 
-  await sessionRequest;
+  return sessionRequest;
+}
+
+async function ensureApiSession(): Promise<void> {
+  if (csrfToken) {
+    return;
+  }
+
+  await refreshApiSession();
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -87,20 +151,63 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
       try {
-        const error = (await response.json()) as ErrorPayload;
+        const error = await parseJsonResponse<ErrorPayload>(response);
         if (error?.error) {
           detail = error.error;
         }
       } catch {
-        // keep fallback detail
+        // Keep fallback detail.
       }
       throw new Error(detail);
     }
 
-    return (await response.json()) as T;
+    const payload = await parseJsonResponse<T>(response);
+    updateCsrfTokenFromPayload(payload);
+    return payload;
   }
 
   throw new Error('Request failed after session retry.');
+}
+
+export async function initializeApiSession(): Promise<AuthState> {
+  return refreshApiSession();
+}
+
+export async function fetchAuthState(): Promise<AuthState> {
+  const payload = await requestJson<AuthState>('/auth/me');
+  return parseAuthState(payload);
+}
+
+export async function registerAccount(input: {
+  username: string;
+  password: string;
+  playerName?: string;
+}): Promise<AuthState> {
+  const payload = await requestJson<SessionPayload>('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({
+      username: input.username,
+      password: input.password,
+      ...(input.playerName ? { playerName: input.playerName } : {}),
+    }),
+  });
+  return parseAuthState(payload);
+}
+
+export async function loginAccount(input: { username: string; password: string }): Promise<AuthState> {
+  const payload = await requestJson<SessionPayload>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return parseAuthState(payload);
+}
+
+export async function logoutAccount(): Promise<AuthState> {
+  const payload = await requestJson<SessionPayload>('/auth/logout', {
+    method: 'POST',
+    body: '{}',
+  });
+  return parseAuthState(payload);
 }
 
 export async function fetchCustomLevels(): Promise<BackendLevelRecord[]> {
@@ -112,7 +219,6 @@ export async function saveCustomLevel(input: {
   id: string;
   name: string;
   text: string;
-  authorName: string;
 }): Promise<BackendLevelRecord> {
   const payload = await requestJson<{ level: BackendLevelRecord }>('/levels', {
     method: 'POST',
@@ -122,14 +228,24 @@ export async function saveCustomLevel(input: {
   return payload.level;
 }
 
-export async function deleteCustomLevel(input: {
-  levelId: string;
-  password: string;
-}): Promise<void> {
+export async function deleteCustomLevel(input: { levelId: string }): Promise<void> {
   await requestJson<{ ok: true; levelId: string }>('/admin/delete-level', {
     method: 'POST',
     body: JSON.stringify(input),
   });
+}
+
+export async function fetchUserProgress(): Promise<AccountProgressRecord | null> {
+  const payload = await requestJson<{ progress: AccountProgressRecord | null }>('/progress');
+  return payload.progress ?? null;
+}
+
+export async function saveUserProgress(selectedLevelId: string): Promise<AccountProgressRecord> {
+  const payload = await requestJson<{ progress: AccountProgressRecord }>('/progress', {
+    method: 'POST',
+    body: JSON.stringify({ selectedLevelId }),
+  });
+  return payload.progress;
 }
 
 export async function fetchTopScores(levelId: string): Promise<LevelScoreRecord[]> {

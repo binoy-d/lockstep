@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   validateDeleteLevelPayload,
+  validateLoginPayload,
   validateLevelId,
   validateLevelPayload,
+  validateProgressPayload,
   normalizeStoredLevelId,
+  validateRegisterPayload,
   validatePlayerName,
   validateScorePayload,
+  validateUsername,
 } from '../src/validation.mjs';
 
 test('validates and normalizes level id and player name', () => {
@@ -32,7 +36,6 @@ test('rejects profane level names', () => {
         id: 'custom-level-8',
         name: hardR,
         text: ['###', '#P!', '###'].join('\n'),
-        authorName: 'Ava',
       }),
     /level name contains blocked language/i,
   );
@@ -51,7 +54,6 @@ test('rejects invalid level payloads', () => {
         id: 'bad id',
         name: 'Bad',
         text: '#',
-        authorName: 'Ava',
       }),
     /level id/i,
   );
@@ -62,7 +64,6 @@ test('rejects invalid level payloads', () => {
         id: 'custom-level-1',
         name: 'Bad',
         text: ['###', '# #', '###'].join('\n'),
-        authorName: 'Ava',
       }),
     /player spawn/i,
   );
@@ -102,30 +103,54 @@ test('validates score payload constraints', () => {
   );
 });
 
-test('validates admin delete payload constraints', () => {
+test('validates delete payload constraints', () => {
   const payload = validateDeleteLevelPayload({
     levelId: 'custom-level-15',
-    password: 'dick',
   });
 
   assert.equal(payload.levelId, 'custom-level-15');
-  assert.equal(payload.password, 'dick');
 
   assert.throws(
     () =>
       validateDeleteLevelPayload({
         levelId: 'custom level',
-        password: 'dick',
       }),
     /level id/i,
   );
+});
 
-  assert.throws(
-    () =>
-      validateDeleteLevelPayload({
-        levelId: 'custom-level-15',
-        password: '',
-      }),
-    /password/i,
-  );
+test('validates account and progress payload constraints', () => {
+  const register = validateRegisterPayload({
+    username: 'Test_User',
+    password: 'secretpass',
+    playerName: 'Ava Lane',
+  });
+  assert.deepEqual(register, {
+    username: 'test_user',
+    password: 'secretpass',
+    playerName: 'Ava Lane',
+  });
+
+  const fallbackRegister = validateRegisterPayload({
+    username: 'player_77',
+    password: 'secretpass',
+  });
+  assert.equal(fallbackRegister.playerName, 'player_77');
+
+  const login = validateLoginPayload({
+    username: 'Player_77',
+    password: 'secretpass',
+  });
+  assert.deepEqual(login, {
+    username: 'player_77',
+    password: 'secretpass',
+  });
+
+  const progress = validateProgressPayload({
+    selectedLevelId: 'custom-level-9',
+  });
+  assert.equal(progress.selectedLevelId, 'custom-level-9');
+
+  assert.equal(validateUsername('Abc_123'), 'abc_123');
+  assert.throws(() => validateRegisterPayload({ username: 'ab', password: 'short' }), /username|password/i);
 });
