@@ -8,17 +8,23 @@ const FORCED_NAME_REPLACEMENTS = new Map([
   [LEGACY_HARD_R, 'Issac'],
   ['gay', 'Issac'],
 ]);
+const LEVEL_NAME_FALLBACK = 'Custom Level';
 
-function sanitizeName(raw) {
+function sanitizeName(raw, maxLength = 32) {
   if (typeof raw !== 'string') {
     return '';
   }
 
-  return raw.trim().replace(/\s+/g, ' ').slice(0, 32);
+  return raw.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+}
+
+function containsBlockedLanguage(value) {
+  const normalized = value.toLowerCase();
+  return normalized.includes(LEGACY_HARD_R) || PROFANITY_FILTER.isProfane(normalized);
 }
 
 export function validatePlayerName(input) {
-  const value = sanitizeName(input);
+  const value = sanitizeName(input, 32);
   if (value.length < 2) {
     throw new Error('Player name must be at least 2 characters.');
   }
@@ -28,7 +34,7 @@ export function validatePlayerName(input) {
     return FORCED_NAME_REPLACEMENTS.get(normalized);
   }
 
-  if (PROFANITY_FILTER.isProfane(normalized)) {
+  if (containsBlockedLanguage(normalized)) {
     throw new Error('Player name contains blocked language.');
   }
 
@@ -98,12 +104,27 @@ export function validateLevelPayload(input) {
     throw new Error('Level payload must be an object.');
   }
 
+  const id = validateLevelId(input.id);
+  const candidateName = sanitizeName(input.name || id, 64) || id;
+  if (containsBlockedLanguage(candidateName)) {
+    throw new Error('Level name contains blocked language.');
+  }
+
   return {
-    id: validateLevelId(input.id),
-    name: sanitizeName(input.name || input.id).slice(0, 64) || validateLevelId(input.id),
+    id,
+    name: candidateName,
     text: validateLevelText(input.text),
     authorName: validatePlayerName(input.authorName),
   };
+}
+
+export function normalizeStoredLevelName(input) {
+  const value = sanitizeName(input, 64);
+  if (value.length === 0 || containsBlockedLanguage(value)) {
+    return LEVEL_NAME_FALLBACK;
+  }
+
+  return value;
 }
 
 export function validateScorePayload(input) {

@@ -95,6 +95,7 @@ test('deletes a level and its scores', () => {
 
 test('normalizes legacy offensive player names on startup', () => {
   const path = makeTempPath('legacy-cleanup');
+  const hardR = String.fromCharCode(110, 105, 103, 103, 101, 114);
   const sqlite = new DatabaseSync(path);
   sqlite.exec(`
     CREATE TABLE user_levels (
@@ -114,17 +115,26 @@ test('normalizes legacy offensive player names on startup', () => {
       created_at INTEGER NOT NULL
     );
   `);
-  sqlite.exec(`
-    INSERT INTO user_levels(id, name, text, author_name, created_at, updated_at)
-    VALUES ('map-x', 'Map X', '###\\n#P!\\n###', 'GAY', 1, 1);
-    INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
-    VALUES ('map-x', 'GAY', 12, 1200, 1);
-  `);
+
+  sqlite
+    .prepare(`
+      INSERT INTO user_levels(id, name, text, author_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?);
+    `)
+    .run('map-x', hardR, '###\n#P!\n###', 'GAY', 1, 1);
+
+  sqlite
+    .prepare(`
+      INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
+      VALUES (?, ?, ?, ?, ?);
+    `)
+    .run('map-x', 'GAY', 12, 1200, 1);
   sqlite.close();
 
   const db = createDatabase(path);
   const levels = db.listLevels();
   const scores = db.getTopScores('map-x', 10);
+  assert.equal(levels[0].name, 'Custom Level');
   assert.equal(levels[0].authorName, 'Issac');
   assert.equal(scores[0].playerName, 'Issac');
 

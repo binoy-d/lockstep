@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { validatePlayerName } from './validation.mjs';
+import { normalizeStoredLevelName, validatePlayerName } from './validation.mjs';
 
 function normalizeStoredPlayerName(raw) {
   try {
@@ -51,6 +51,11 @@ export function createDatabase(dbPath) {
     FROM user_levels;
   `);
 
+  const distinctLevelNamesStmt = db.prepare(`
+    SELECT DISTINCT name AS levelName
+    FROM user_levels;
+  `);
+
   const updateScoreNameStmt = db.prepare(`
     UPDATE level_scores
     SET player_name = ?
@@ -61,6 +66,12 @@ export function createDatabase(dbPath) {
     UPDATE user_levels
     SET author_name = ?
     WHERE author_name = ?;
+  `);
+
+  const updateLevelNameStmt = db.prepare(`
+    UPDATE user_levels
+    SET name = ?
+    WHERE name = ?;
   `);
 
   for (const row of distinctScoreNamesStmt.all()) {
@@ -74,6 +85,13 @@ export function createDatabase(dbPath) {
     const next = normalizeStoredPlayerName(row.authorName);
     if (next !== row.authorName) {
       updateAuthorNameStmt.run(next, row.authorName);
+    }
+  }
+
+  for (const row of distinctLevelNamesStmt.all()) {
+    const next = normalizeStoredLevelName(row.levelName);
+    if (next !== row.levelName) {
+      updateLevelNameStmt.run(next, row.levelName);
     }
   }
 

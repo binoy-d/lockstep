@@ -23,6 +23,20 @@ test('rejects profane player names', () => {
   assert.throws(() => validatePlayerName('shithead'), /blocked language/i);
 });
 
+test('rejects profane level names', () => {
+  const hardR = String.fromCharCode(110, 105, 103, 103, 101, 114);
+  assert.throws(
+    () =>
+      validateLevelPayload({
+        id: 'custom-level-8',
+        name: hardR,
+        text: ['###', '#P!', '###'].join('\n'),
+        authorName: 'Ava',
+      }),
+    /level name contains blocked language/i,
+  );
+});
+
 test('rejects invalid level payloads', () => {
   assert.throws(
     () =>
