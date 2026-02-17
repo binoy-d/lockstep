@@ -10,13 +10,22 @@ import { OverlayUI } from './ui/overlay';
 import './styles.css';
 
 function readRequestedLevelId(): string | null {
-  const params = new URL(window.location.href).searchParams;
-  const raw = params.get('level');
-  if (!raw) {
+  const currentUrl = new URL(window.location.href);
+  const fromQuery = currentUrl.searchParams.get('level');
+  if (fromQuery) {
+    return fromQuery.trim().toLowerCase().replace(/\s+/g, '');
+  }
+
+  const shareMatch = currentUrl.pathname.match(/^\/(?:l|share)\/([^/]+)\/?$/i);
+  if (!shareMatch) {
     return null;
   }
 
-  return raw.trim().toLowerCase().replace(/\s+/g, '');
+  try {
+    return decodeURIComponent(shareMatch[1]).trim().toLowerCase().replace(/\s+/g, '');
+  } catch {
+    return shareMatch[1].trim().toLowerCase().replace(/\s+/g, '');
+  }
 }
 
 async function bootstrap(): Promise<void> {

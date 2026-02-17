@@ -1544,12 +1544,14 @@ export class OverlayUI {
     }
 
     const url = new URL(window.location.href);
-    if (url.searchParams.get('level') === selectedLevel.id) {
+    const desiredPath = `/l/${encodeURIComponent(selectedLevel.id)}`;
+    if (url.pathname === desiredPath && !url.search) {
       this.lastSyncedUrlLevelId = selectedLevel.id;
       return;
     }
 
-    url.searchParams.set('level', selectedLevel.id);
+    url.pathname = desiredPath;
+    url.search = '';
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
     this.lastSyncedUrlLevelId = selectedLevel.id;
   }

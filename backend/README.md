@@ -36,6 +36,13 @@ npm run test
 
 All requests/responses are JSON.
 
+## Share + Preview Routes
+
+- `GET /l/:levelId` (or `GET /share/:levelId`)
+  - Returns social-meta HTML for link previews and immediately forwards browsers to `/?level=:levelId`.
+- `GET /og/:levelId.png`
+  - Returns a dynamically generated level preview image (minimap-based PNG).
+
 ## Storage
 
 SQLite file at `backend/data/puzzle.sqlite` (configurable via `DB_PATH`).

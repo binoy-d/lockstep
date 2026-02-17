@@ -1,7 +1,10 @@
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { URL } from 'node:url';
 import { API_SESSION_SECRET, DEFAULT_PORT, DB_PATH, PUBLIC_ORIGIN } from './config.mjs';
+import { getBuiltInLevel } from './builtInLevels.mjs';
 import { createDatabase } from './db.mjs';
+import { renderLevelPreviewPng } from './levelPreviewImage.mjs';
 import { hashPassword, verifyPassword } from './passwords.mjs';
 import { issueSession, parseCookies, verifySessionToken } from './security.mjs';
 import {
@@ -21,6 +24,7 @@ const SCORE_RATE_LIMIT_WINDOW_MS = 60_000;
 const SCORE_RATE_LIMIT_MAX = 45;
 const DEV_ALLOWED_ORIGINS = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
 const scoreRateBuckets = new Map();
+const previewImageCache = new Map();
 
 function asPublicUser(user) {
   return {
@@ -99,8 +103,150 @@ function sendNoContent(req, res, headers = {}) {
   res.end();
 }
 
+function sendHtml(req, res, statusCode, html, headers = {}) {
+  res.writeHead(
+    statusCode,
+    buildResponseHeaders(req, {
+      'Content-Type': 'text/html; charset=utf-8',
+      ...headers,
+    }),
+  );
+  res.end(html);
+}
+
+function sendBinary(req, res, statusCode, body, headers = {}) {
+  res.writeHead(statusCode, buildResponseHeaders(req, headers));
+  res.end(body);
+}
+
 function notFound(req, res) {
   sendJson(req, res, 404, { error: 'Not found' });
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function normalizeLevelSlug(input) {
+  if (typeof input !== 'string') {
+    return 'unknown-level';
+  }
+
+  const normalized = input.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '').slice(0, 64);
+  return normalized.length >= 3 ? normalized : 'unknown-level';
+}
+
+function tryParseLevelId(input) {
+  try {
+    return validateLevelId(input);
+  } catch {
+    return null;
+  }
+}
+
+function decodePathSegment(input) {
+  try {
+    return decodeURIComponent(input);
+  } catch {
+    return input;
+  }
+}
+
+function resolveLevelForPreview(levelId) {
+  const builtInLevel = getBuiltInLevel(levelId);
+  if (builtInLevel) {
+    return builtInLevel;
+  }
+
+  const customLevel = db.getLevel(levelId);
+  if (!customLevel) {
+    return null;
+  }
+
+  return {
+    id: customLevel.id,
+    name: customLevel.name,
+    text: customLevel.text,
+    updatedAt: customLevel.updatedAt ?? 0,
+    isBuiltIn: false,
+  };
+}
+
+function previewCacheKey(levelRecord) {
+  const updatedAt = Number.isFinite(levelRecord?.updatedAt) ? levelRecord.updatedAt : 0;
+  return `${levelRecord?.id ?? 'unknown'}:${updatedAt}`;
+}
+
+function invalidatePreviewCache(levelId) {
+  const prefix = `${levelId}:`;
+  for (const key of previewImageCache.keys()) {
+    if (key.startsWith(prefix)) {
+      previewImageCache.delete(key);
+    }
+  }
+}
+
+function getLevelPreviewImage(levelRecord) {
+  const key = previewCacheKey(levelRecord);
+  const existing = previewImageCache.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const body = renderLevelPreviewPng(levelRecord);
+  const etag = `"${createHash('sha1').update(key).update(body).digest('hex').slice(0, 24)}"`;
+  const entry = { body, etag };
+  previewImageCache.set(key, entry);
+  return entry;
+}
+
+function buildShareHtml(levelId, levelRecord) {
+  const safeLevelId = escapeHtml(levelId);
+  const levelNameRaw = levelRecord?.name ?? 'Unknown Level';
+  const titleRaw = levelRecord ? `LOCKSTEP • ${levelNameRaw}` : `LOCKSTEP • ${levelId}`;
+  const descriptionRaw = levelRecord
+    ? `Play "${levelNameRaw}" in LOCKSTEP. Solve fast and climb the leaderboard.`
+    : `This LOCKSTEP level link is unavailable. Open Level Select to pick another map.`;
+  const title = escapeHtml(titleRaw);
+  const description = escapeHtml(descriptionRaw);
+  const shareUrl = `${PUBLIC_ORIGIN}/l/${encodeURIComponent(levelId)}`;
+  const imageUrl = `${PUBLIC_ORIGIN}/og/${encodeURIComponent(levelId)}.png`;
+  const redirectPath = `/?level=${encodeURIComponent(levelId)}`;
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${title}</title>
+    <meta name="description" content="${description}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="${shareUrl}" />
+    <meta property="og:site_name" content="LOCKSTEP" />
+    <meta property="og:title" content="${title}" />
+    <meta property="og:description" content="${description}" />
+    <meta property="og:image" content="${imageUrl}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${title}" />
+    <meta name="twitter:description" content="${description}" />
+    <meta name="twitter:image" content="${imageUrl}" />
+    <meta http-equiv="refresh" content="0; url=${redirectPath}" />
+    <script>
+      window.location.replace(${JSON.stringify(redirectPath)});
+    </script>
+  </head>
+  <body>
+    <p>Opening level <strong>${safeLevelId}</strong> in LOCKSTEP…</p>
+    <p><a href="${redirectPath}">Continue</a></p>
+  </body>
+</html>`;
 }
 
 function readSessionFromCookie(req) {
@@ -213,6 +359,52 @@ const server = createServer(async (req, res) => {
   const { pathname } = url;
 
   try {
+    if (req.method === 'GET') {
+      const ogMatch = pathname.match(/^\/og\/([^/]+)\.png$/);
+      if (ogMatch) {
+        const rawLevelSegment = decodePathSegment(ogMatch[1]);
+        const levelSlug = normalizeLevelSlug(rawLevelSegment);
+        const normalizedLevelId = tryParseLevelId(levelSlug);
+        const levelRecord = normalizedLevelId ? resolveLevelForPreview(normalizedLevelId) : null;
+        const previewLevel = levelRecord ?? {
+          id: levelSlug,
+          name: `Level ${levelSlug}`,
+          text: '',
+          updatedAt: -1,
+          isBuiltIn: false,
+        };
+        const preview = getLevelPreviewImage(previewLevel);
+
+        if (req.headers['if-none-match'] === preview.etag) {
+          sendBinary(req, res, 304, Buffer.alloc(0), {
+            ETag: preview.etag,
+            'Cache-Control': 'public, max-age=300',
+          });
+          return;
+        }
+
+        sendBinary(req, res, 200, preview.body, {
+          'Content-Type': 'image/png',
+          ETag: preview.etag,
+          'Cache-Control': 'public, max-age=300',
+        });
+        return;
+      }
+
+      const shareMatch = pathname.match(/^\/(?:l|share)\/([^/]+)\/?$/);
+      if (shareMatch) {
+        const rawLevelSegment = decodePathSegment(shareMatch[1]);
+        const levelSlug = normalizeLevelSlug(rawLevelSegment);
+        const normalizedLevelId = tryParseLevelId(levelSlug);
+        const levelRecord = normalizedLevelId ? resolveLevelForPreview(normalizedLevelId) : null;
+        const html = buildShareHtml(levelSlug, levelRecord);
+        sendHtml(req, res, 200, html, {
+          'Cache-Control': 'no-cache',
+        });
+        return;
+      }
+    }
+
     if (req.method === 'GET' && pathname === '/api/health') {
       sendJson(req, res, 200, { ok: true });
       return;
@@ -373,6 +565,7 @@ const server = createServer(async (req, res) => {
         authorName: account.user.playerName,
         ownerUserId,
       });
+      invalidatePreviewCache(saved.id);
       sendJson(req, res, 200, { level: saved });
       return;
     }
@@ -398,6 +591,7 @@ const server = createServer(async (req, res) => {
       }
 
       db.deleteLevel(payload.levelId);
+      invalidatePreviewCache(payload.levelId);
       sendJson(req, res, 200, { ok: true, levelId: payload.levelId });
       return;
     }
