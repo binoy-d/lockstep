@@ -321,6 +321,8 @@ export class OverlayUI {
 
   private autoStartFromDeepLinkPending = false;
 
+  private lastSyncedUrlLevelId: string | null = null;
+
   public constructor(root: HTMLElement, controller: GameController, options: OverlayUiOptions = {}) {
     this.root = root;
     this.controller = controller;
@@ -1537,14 +1539,19 @@ export class OverlayUI {
     if (!selectedLevel || selectedLevel.id.startsWith(EDITOR_TEST_LEVEL_ID)) {
       return;
     }
+    if (this.lastSyncedUrlLevelId === selectedLevel.id) {
+      return;
+    }
 
     const url = new URL(window.location.href);
     if (url.searchParams.get('level') === selectedLevel.id) {
+      this.lastSyncedUrlLevelId = selectedLevel.id;
       return;
     }
 
     url.searchParams.set('level', selectedLevel.id);
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    this.lastSyncedUrlLevelId = selectedLevel.id;
   }
 
   private syncLevelOptions(snapshot: ControllerSnapshot): void {

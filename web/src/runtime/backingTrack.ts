@@ -6,6 +6,8 @@ const BPM = 124;
 const STEP_DURATION_SECONDS = 60 / BPM / 4;
 const SCHEDULE_AHEAD_SECONDS = 0.22;
 const SCHEDULER_INTERVAL_MS = 36;
+const MAX_SCHEDULED_STEPS_PER_TICK = 20;
+const MAX_SCHEDULER_DRIFT_SECONDS = 0.8;
 const MOVE_TEMPO_BOOST_MAX = 0.18;
 const MOVE_TEMPO_BOOST_PER_MOVE = 0.055;
 const MOVE_TEMPO_DECAY_PER_SECOND = 0.42;
@@ -216,6 +218,7 @@ export class ProceduralBackingTrack {
     if (this.audioContext.state === 'running') {
       await this.audioContext.suspend();
     }
+    this.stopScheduler();
     this.clearPulseTimeouts();
   }
 
@@ -231,6 +234,10 @@ export class ProceduralBackingTrack {
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
     }
+
+    this.nextStepTime = this.audioContext.currentTime + 0.08;
+    this.lastTempoDecayTime = this.audioContext.currentTime;
+    this.startScheduler();
   }
 
   private setMusicVolume(volume: number): void {
@@ -338,8 +345,15 @@ export class ProceduralBackingTrack {
       return;
     }
 
-    this.decayMoveTempo(this.audioContext.currentTime);
-    while (this.nextStepTime < this.audioContext.currentTime + SCHEDULE_AHEAD_SECONDS) {
+    const now = this.audioContext.currentTime;
+    if (this.nextStepTime < now - MAX_SCHEDULER_DRIFT_SECONDS) {
+      // Drop stale backlog after long timer throttling/backgrounding.
+      this.nextStepTime = now + 0.02;
+    }
+
+    this.decayMoveTempo(now);
+    let scheduledCount = 0;
+    while (this.nextStepTime < now + SCHEDULE_AHEAD_SECONDS && scheduledCount < MAX_SCHEDULED_STEPS_PER_TICK) {
       this.scheduleStep(this.nextStepTime, this.stepInBar, this.barIndex);
       const tempoFactor = 1 + this.moveTempoBoost;
       this.nextStepTime += STEP_DURATION_SECONDS / tempoFactor;
@@ -348,6 +362,11 @@ export class ProceduralBackingTrack {
         this.stepInBar = 0;
         this.barIndex = (this.barIndex + 1) % 4;
       }
+      scheduledCount += 1;
+    }
+
+    if (scheduledCount >= MAX_SCHEDULED_STEPS_PER_TICK) {
+      this.nextStepTime = now + 0.02;
     }
   }
 
