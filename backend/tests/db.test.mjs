@@ -145,6 +145,39 @@ test('manages users, ownership, and per-user progress', () => {
   rmSync(path, { force: true });
 });
 
+test('requires account-linked clear proof for publishing levels', () => {
+  const path = makeTempPath('publish-proof');
+  const db = createDatabase(path);
+
+  const creator = db.createUser({
+    username: 'creator_user',
+    passwordHash: 'hash',
+    playerName: 'Creator',
+    isAdmin: false,
+  });
+  const other = db.createUser({
+    username: 'other_user',
+    passwordHash: 'hash',
+    playerName: 'Other',
+    isAdmin: false,
+  });
+
+  assert.equal(db.hasUserPublishProof('custom-level-proof', creator.id), false);
+
+  db.insertScore({
+    levelId: '__editor-test-level-custom-level-proof',
+    playerName: creator.playerName,
+    userId: creator.id,
+    moves: 11,
+    durationMs: 1100,
+  });
+
+  assert.equal(db.hasUserPublishProof('custom-level-proof', creator.id), true);
+  assert.equal(db.hasUserPublishProof('custom-level-proof', other.id), false);
+
+  rmSync(path, { force: true });
+});
+
 test('normalizes legacy offensive player names on startup', () => {
   const path = makeTempPath('legacy-cleanup');
   const hardR = String.fromCharCode(110, 105, 103, 103, 101, 114);

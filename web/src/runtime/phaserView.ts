@@ -191,6 +191,8 @@ class PuzzleScene extends Phaser.Scene {
       .setDepth(7)
       .setScrollFactor(0)
       .setOrigin(0.5, 0.5)
+      .setAlign('center')
+      .setLineSpacing(6)
       .setVisible(false)
       .setShadow(0, 2, '#00130d', 12, false, true);
     this.fpsText = this.add
@@ -736,7 +738,18 @@ class PuzzleScene extends Phaser.Scene {
       apertureSize,
     );
 
-    this.transitionText.setVisible(false);
+    const textReveal = Phaser.Math.Easing.Cubic.Out(Phaser.Math.Clamp((progress - 0.1) / 0.45, 0, 1));
+    const textFade = Phaser.Math.Clamp((progress - 0.9) / 0.1, 0, 1);
+    const textAlpha = Phaser.Math.Clamp((0.2 + textReveal * 0.92) * (1 - textFade), 0, 1);
+    const scoreText = `${transition.completedMoves} moves • ${(transition.completedDurationMs / 1000).toFixed(1)}s`;
+    const textY = viewport.top + Math.max(42, Math.min(124, viewport.height * 0.2));
+    this.transitionText
+      .setVisible(true)
+      .setPosition(centerX, textY)
+      .setFontSize(this.isMobileDevice ? '24px' : '34px')
+      .setText(`LEVEL CLEAR\n${scoreText}`)
+      .setAlpha(textAlpha)
+      .setScale(Phaser.Math.Linear(1.08, 1, textReveal));
 
     return true;
   }

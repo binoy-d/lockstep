@@ -3,6 +3,8 @@ import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { normalizeStoredLevelId, normalizeStoredLevelName, validatePlayerName, validateUsername } from './validation.mjs';
 
+const EDITOR_TEST_LEVEL_ID_PREFIX = '__editor-test-level-';
+
 function normalizeStoredPlayerName(raw) {
   try {
     return validatePlayerName(raw);
@@ -76,6 +78,7 @@ export function createDatabase(dbPath) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       level_id TEXT NOT NULL,
       player_name TEXT NOT NULL,
+      user_id INTEGER,
       moves INTEGER NOT NULL,
       duration_ms INTEGER NOT NULL,
       created_at INTEGER NOT NULL
@@ -105,9 +108,13 @@ export function createDatabase(dbPath) {
   `);
 
   maybeAddColumn(db, `ALTER TABLE user_levels ADD COLUMN owner_user_id INTEGER;`);
+  maybeAddColumn(db, `ALTER TABLE level_scores ADD COLUMN user_id INTEGER;`);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_user_levels_owner
       ON user_levels(owner_user_id);
+
+    CREATE INDEX IF NOT EXISTS idx_level_scores_user_level
+      ON level_scores(user_id, level_id);
   `);
 
   const distinctScoreNamesStmt = db.prepare(`
@@ -295,8 +302,8 @@ export function createDatabase(dbPath) {
   `);
 
   const insertScoreStmt = db.prepare(`
-    INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
-    VALUES(?, ?, ?, ?, ?);
+    INSERT INTO level_scores(level_id, player_name, user_id, moves, duration_ms, created_at)
+    VALUES(?, ?, ?, ?, ?, ?);
   `);
 
   const topScoresStmt = db.prepare(`
@@ -305,6 +312,14 @@ export function createDatabase(dbPath) {
     WHERE level_id = ?
     ORDER BY moves ASC, duration_ms ASC, created_at ASC
     LIMIT ?;
+  `);
+
+  const hasPublishProofStmt = db.prepare(`
+    SELECT 1
+    FROM level_scores
+    WHERE user_id = ?
+      AND (level_id = ? OR level_id = ?)
+    LIMIT 1;
   `);
 
   const deleteLevelStmt = db.prepare(`
@@ -408,11 +423,27 @@ export function createDatabase(dbPath) {
 
     insertScore(score) {
       const now = Date.now();
-      insertScoreStmt.run(score.levelId, score.playerName, score.moves, score.durationMs, now);
+      insertScoreStmt.run(
+        score.levelId,
+        score.playerName,
+        Number.isInteger(score.userId) ? score.userId : null,
+        score.moves,
+        score.durationMs,
+        now,
+      );
     },
 
     getTopScores(levelId, limit = 10) {
       return topScoresStmt.all(levelId, limit);
+    },
+
+    hasUserPublishProof(levelId, userId) {
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return false;
+      }
+
+      const editorTestLevelId = `${EDITOR_TEST_LEVEL_ID_PREFIX}${levelId}`;
+      return Boolean(hasPublishProofStmt.get(userId, levelId, editorTestLevelId));
     },
 
     deleteLevel(levelId) {

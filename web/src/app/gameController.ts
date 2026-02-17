@@ -14,7 +14,6 @@ export type Screen = 'intro' | 'main' | 'level-select' | 'settings' | 'editor' |
 
 const DEATH_ANIMATION_MS = 620;
 const WIN_TRANSITION_MS = 980;
-const EDITOR_TEST_LEVEL_ID_PREFIX = '__editor-test-level';
 
 export interface EnemyDeathAnimationSnapshot extends EnemyImpact {
   kind: 'enemy';
@@ -36,6 +35,8 @@ export interface WinTransitionSnapshot {
   sequence: number;
   startedAtMs: number;
   durationMs: number;
+  completedMoves: number;
+  completedDurationMs: number;
   sourceLevelId: string;
   sourceLevelWidth: number;
   sourceLevelHeight: number;
@@ -96,6 +97,8 @@ export class GameController {
   private winTransition: WinTransitionSnapshot | null = null;
 
   private winTransitionSequence = 0;
+
+  private readonly pendingScoreSubmissions = new Set<Promise<void>>();
 
   public constructor(levels: ParsedLevel[], settings: GameSettings) {
     if (levels.length === 0) {
@@ -317,6 +320,7 @@ export class GameController {
     this.deathAnimation = null;
 
     if (next.lastEvent === 'level-advanced') {
+      const durationMs = Math.max(0, nowMs - this.levelStartedAtMs);
       const finishImpact = detectGoalFinishImpact(previous, direction);
       const sourceLevel = previous.levels[previous.levelId];
       if (sourceLevel) {
@@ -332,6 +336,8 @@ export class GameController {
             sequence: this.winTransitionSequence,
             startedAtMs: nowMs,
             durationMs: WIN_TRANSITION_MS,
+            completedMoves,
+            completedDurationMs: durationMs,
             sourceLevelId: previous.levelId,
             sourceLevelWidth: sourceLevel.width,
             sourceLevelHeight: sourceLevel.height,
@@ -342,10 +348,9 @@ export class GameController {
       }
 
       this.selectedLevelIndex = next.levelIndex;
-      this.statusMessage = `Level ${next.levelIndex + 1}`;
-      const durationMs = Math.max(0, nowMs - this.levelStartedAtMs);
+      this.statusMessage = `Level clear: ${completedMoves} moves in ${(durationMs / 1000).toFixed(1)}s.`;
       this.levelStartedAtMs = nowMs;
-      void this.submitCompletedScore(completedLevelId, completedMoves, durationMs);
+      this.queueScoreSubmission(completedLevelId, completedMoves, durationMs);
     } else if (next.lastEvent === 'level-reset') {
       this.levelStartedAtMs = nowMs;
     }
@@ -353,9 +358,9 @@ export class GameController {
     if (next.status === 'game-complete') {
       const finalMoves = next.lastEvent === 'game-complete' ? next.moves : completedMoves;
       const durationMs = Math.max(0, nowMs - this.levelStartedAtMs);
-      void this.submitCompletedScore(completedLevelId, finalMoves, durationMs);
+      this.queueScoreSubmission(completedLevelId, finalMoves, durationMs);
       this.screen = 'main';
-      this.statusMessage = 'All levels complete.';
+      this.statusMessage = `All levels complete. Final clear: ${finalMoves} moves in ${(durationMs / 1000).toFixed(1)}s.`;
       this.selectedLevelIndex = this.levels.length - 1;
       this.inputQueue.length = 0;
       this.levelStartedAtMs = nowMs;
@@ -378,6 +383,14 @@ export class GameController {
 
   public getPlayerName(): string {
     return this.playerName;
+  }
+
+  public async waitForPendingScoreSubmissions(): Promise<void> {
+    if (this.pendingScoreSubmissions.size === 0) {
+      return;
+    }
+
+    await Promise.allSettled(Array.from(this.pendingScoreSubmissions));
   }
 
   public upsertLevel(level: ParsedLevel): number {
@@ -522,12 +535,18 @@ export class GameController {
     this.inputQueue.length = 0;
   }
 
+  private queueScoreSubmission(levelId: string, moves: number, durationMs: number): void {
+    const task = this.submitCompletedScore(levelId, moves, durationMs).catch(() => {
+      // Non-fatal.
+    });
+    this.pendingScoreSubmissions.add(task);
+    void task.finally(() => {
+      this.pendingScoreSubmissions.delete(task);
+    });
+  }
+
   private async submitCompletedScore(levelId: string, moves: number, durationMs: number): Promise<void> {
     if (!this.playerName) {
-      return;
-    }
-
-    if (levelId.startsWith(EDITOR_TEST_LEVEL_ID_PREFIX)) {
       return;
     }
 

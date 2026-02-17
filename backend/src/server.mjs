@@ -360,6 +360,13 @@ const server = createServer(async (req, res) => {
         }
       }
 
+      if (!db.hasUserPublishProof(payload.id, userId)) {
+        sendJson(req, res, 403, {
+          error: 'Beat this level in Test + Play while signed in before publishing.',
+        });
+        return;
+      }
+
       const ownerUserId = existing?.ownerUserId ?? userId;
       const saved = db.upsertLevel({
         ...payload,
@@ -426,7 +433,10 @@ const server = createServer(async (req, res) => {
         payload.playerName = user.playerName;
       }
 
-      db.insertScore(payload);
+      db.insertScore({
+        ...payload,
+        userId: session.userId ?? null,
+      });
       const scores = db.getTopScores(payload.levelId, 10);
       sendJson(req, res, 201, { levelId: payload.levelId, scores });
       return;

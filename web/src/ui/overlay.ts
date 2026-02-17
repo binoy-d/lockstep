@@ -1731,7 +1731,7 @@ export class OverlayUI {
     this.editorLoadedLevelId = publishLevelId;
     this.controller.startLevel(levelIndex);
     this.showEditorFeedback(
-      `Testing ${publishLevelId}. Pause and use "Back to Editor (Test)" to keep iterating before publish.`,
+      `Testing ${publishLevelId}. Beat it while signed in, then publish from the editor.`,
     );
   }
 
@@ -1780,6 +1780,7 @@ export class OverlayUI {
     const text = serializeGrid(this.editorGrid);
 
     try {
+      await this.controller.waitForPendingScoreSubmissions();
       const saved = await saveCustomLevel({
         id: levelId,
         name: levelId,
