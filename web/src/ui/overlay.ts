@@ -510,9 +510,10 @@ export class OverlayUI {
         id="btn-mobile-open-menu"
         data-mobile-only
         aria-label="Open pause menu"
+        title="Menu"
         hidden
       >
-        Menu
+        &#9776;
       </button>
       <button
         type="button"
