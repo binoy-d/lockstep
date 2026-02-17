@@ -14,33 +14,21 @@ jobs:
   deploy:
     name: Deploy lockstep.binoy.co
     if: ${{ github.event.repository.private == false }}
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - lockstep
     environment: production
 
     steps:
-      - name: Install sshpass
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y sshpass
-
-      - name: Deploy over SSH
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+      - name: Deploy on self-hosted runner
         run: |
           set -euo pipefail
-          sshpass -p "$DEPLOY_PASSWORD" ssh \
-            -o StrictHostKeyChecking=accept-new \
-            -o ConnectTimeout=20 \
-            "$DEPLOY_USER@$DEPLOY_HOST" \
-            'set -euo pipefail
-            cd /home/daniel/dev/lockstep
-            current_branch=$(git branch --show-current)
-            if [ "$current_branch" != "main" ]; then
-              git checkout main
-            fi
-            git fetch origin main
-            git pull --ff-only origin main
-            docker-compose up -d --build
-            docker-compose ps'
+          cd /home/daniel/dev/lockstep
+          current_branch=$(git branch --show-current)
+          if [ "$current_branch" != "main" ]; then
+            git checkout main
+          fi
+          git fetch origin main
+          git pull --ff-only origin main
+          docker-compose up -d --build
+          docker-compose ps

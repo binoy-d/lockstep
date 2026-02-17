@@ -96,16 +96,12 @@ npm run build
 
 ## Production Deploy (GitHub Actions)
 
-This repo is public, so GitHub-hosted runners are free for workflow usage.
+This repo uses a self-hosted runner (`lockstep` label) on `binoyserver`, so deploy runs do not consume paid GitHub-hosted minutes.
 
 Deploy steps:
 
-1. Add repository secrets:
-   - `DEPLOY_HOST` (e.g. `ssh.binoy.co`)
-   - `DEPLOY_USER` (e.g. `daniel`)
-   - `DEPLOY_PASSWORD` (server SSH password)
-2. In GitHub, run workflow: `Actions -> deploy-production -> Run workflow`.
-3. The job SSHes to `/home/daniel/dev/lockstep`, pulls `main`, and runs:
+1. In GitHub, run workflow: `Actions -> deploy-production -> Run workflow`.
+2. The self-hosted runner executes on `/home/daniel/dev/lockstep`, pulls `main`, and runs:
    - `docker-compose up -d --build`
 
 Safety guard:
