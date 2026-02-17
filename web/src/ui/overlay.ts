@@ -135,6 +135,7 @@ interface OverlayUiOptions {
       ownerUsername: string | null;
     }
   >;
+  autoStartFromDeepLink?: boolean;
 }
 
 export class OverlayUI {
@@ -318,6 +319,8 @@ export class OverlayUI {
 
   private levelSelectCardContainers = new Map<number, HTMLElement>();
 
+  private autoStartFromDeepLinkPending = false;
+
   public constructor(root: HTMLElement, controller: GameController, options: OverlayUiOptions = {}) {
     this.root = root;
     this.controller = controller;
@@ -331,6 +334,7 @@ export class OverlayUI {
         });
       }
     }
+    this.autoStartFromDeepLinkPending = Boolean(options.autoStartFromDeepLink);
 
     this.root.innerHTML = this.buildMarkup();
 
@@ -1291,6 +1295,7 @@ export class OverlayUI {
     const screenChanged = this.lastRenderedScreen !== snapshot.screen;
     this.lastSnapshot = snapshot;
     this.syncLevelOptions(snapshot);
+    this.syncLevelUrl(snapshot);
 
     if (screenChanged && snapshot.screen === 'main' && this.editorTestingPublishLevelId) {
       this.returnFromEditorTest();
@@ -1327,6 +1332,13 @@ export class OverlayUI {
     }
 
     const canPlay = snapshot.playerName.trim().length > 0;
+    if (this.autoStartFromDeepLinkPending && snapshot.screen === 'intro' && canPlay) {
+      this.autoStartFromDeepLinkPending = false;
+      this.closeIntroPanels();
+      this.controller.startSelectedLevel();
+      return;
+    }
+
     this.playButton.disabled = !canPlay;
     this.levelStartButton.disabled = !canPlay;
     this.introStartButton.disabled = !canPlay;
@@ -1518,6 +1530,21 @@ export class OverlayUI {
 
     this.controller.setSelectedLevel(firstVisible);
     void this.loadScoresForSelectedLevel(true);
+  }
+
+  private syncLevelUrl(snapshot: ControllerSnapshot): void {
+    const selectedLevel = snapshot.levels[snapshot.selectedLevelIndex];
+    if (!selectedLevel || selectedLevel.id.startsWith(EDITOR_TEST_LEVEL_ID)) {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('level') === selectedLevel.id) {
+      return;
+    }
+
+    url.searchParams.set('level', selectedLevel.id);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
   private syncLevelOptions(snapshot: ControllerSnapshot): void {

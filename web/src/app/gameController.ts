@@ -194,6 +194,22 @@ export class GameController {
     return true;
   }
 
+  public openLevelSelectFromDeepLink(message?: string): void {
+    if (this.screen !== 'intro' && this.screen !== 'main' && this.screen !== 'level-select') {
+      return;
+    }
+
+    if (this.screen !== 'level-select') {
+      this.levelSelectReturnScreen = this.screen;
+    }
+
+    this.screen = 'level-select';
+    if (message) {
+      this.statusMessage = message;
+    }
+    this.emit();
+  }
+
   public closeLevelSelect(): void {
     if (this.screen !== 'level-select') {
       return;

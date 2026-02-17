@@ -9,6 +9,16 @@ import { loadSettings } from './runtime/settingsStorage';
 import { OverlayUI } from './ui/overlay';
 import './styles.css';
 
+function readRequestedLevelId(): string | null {
+  const params = new URL(window.location.href).searchParams;
+  const raw = params.get('level');
+  if (!raw) {
+    return null;
+  }
+
+  return raw.trim().toLowerCase().replace(/\s+/g, '');
+}
+
 async function bootstrap(): Promise<void> {
   const appRoot = document.querySelector<HTMLDivElement>('#app');
   if (!appRoot) {
@@ -53,6 +63,18 @@ async function bootstrap(): Promise<void> {
   const settings = loadSettings();
 
   const controller = new GameController(levels, settings);
+  const requestedLevelId = readRequestedLevelId();
+  let autoStartFromDeepLink = false;
+  if (requestedLevelId) {
+    const requestedLevelIndex = levels.findIndex((level) => level.id === requestedLevelId);
+    if (requestedLevelIndex >= 0) {
+      controller.setSelectedLevel(requestedLevelIndex);
+      autoStartFromDeepLink = true;
+    } else {
+      controller.openLevelSelectFromDeepLink(`Level "${requestedLevelId}" was not found. Pick a level.`);
+    }
+  }
+
   new PhaserGameView('game-root', controller);
   const backingTrack = new ProceduralBackingTrack(controller);
   window.addEventListener(
@@ -71,6 +93,7 @@ async function bootstrap(): Promise<void> {
   new OverlayUI(menuRoot, controller, {
     builtInLevelCount: builtInLevels.length,
     customLevelOwners,
+    autoStartFromDeepLink,
   });
 }
 
