@@ -492,6 +492,8 @@ class PuzzleScene extends Phaser.Scene {
     const boardHeight = levelHeight * tileSize;
     let offsetX = Math.floor(viewport.left + (viewport.width - boardWidth) / 2);
     let offsetY = Math.floor(viewport.top + (viewport.height - boardHeight) / 2);
+    let cameraBaseCenterX = viewport.centerX;
+    let cameraBaseCenterY = viewport.centerY;
 
     let cameraClamp:
       | {
@@ -503,44 +505,56 @@ class PuzzleScene extends Phaser.Scene {
       | null = null;
 
     if (this.isMobileDevice && state.players.length > 0) {
-      const playerCentersX = state.players.map((player) => (player.x + 0.5) * tileSize);
-      const playerCentersY = state.players.map((player) => (player.y + 0.5) * tileSize);
-      const minPlayerCenterX = Math.min(...playerCentersX);
-      const maxPlayerCenterX = Math.max(...playerCentersX);
-      const minPlayerCenterY = Math.min(...playerCentersY);
-      const maxPlayerCenterY = Math.max(...playerCentersY);
-
       const isPortrait = viewport.height > viewport.width * 1.05;
-      const playerMarginX = isPortrait ? Math.max(8, tileSize * 0.55) : Math.max(12, tileSize * 0.9);
-      const playerMarginY = isPortrait ? Math.max(10, tileSize * 0.7) : Math.max(16, tileSize * 1.05);
+      const playerLocalCentersX = state.players.map((player) => (player.x + 0.5) * tileSize);
+      const playerLocalCentersY = state.players.map((player) => (player.y + 0.5) * tileSize);
+      const minPlayerLocalCenterX = Math.min(...playerLocalCentersX);
+      const maxPlayerLocalCenterX = Math.max(...playerLocalCentersX);
+      const minPlayerLocalCenterY = Math.min(...playerLocalCentersY);
+      const maxPlayerLocalCenterY = Math.max(...playerLocalCentersY);
 
-      const minOffsetX = viewport.left + playerMarginX - minPlayerCenterX;
-      const maxOffsetX = viewport.left + viewport.width - playerMarginX - maxPlayerCenterX;
-      const minOffsetY = viewport.top + playerMarginY - minPlayerCenterY;
-      const maxOffsetY = viewport.top + viewport.height - playerMarginY - maxPlayerCenterY;
+      const playerMarginX = isPortrait ? Math.max(18, tileSize * 0.85) : Math.max(12, tileSize * 0.9);
+      const playerMarginY = isPortrait ? Math.max(16, tileSize * 0.85) : Math.max(16, tileSize * 1.05);
+
+      const minOffsetX = viewport.left + playerMarginX - minPlayerLocalCenterX;
+      const maxOffsetX = viewport.left + viewport.width - playerMarginX - maxPlayerLocalCenterX;
+      const minOffsetY = viewport.top + playerMarginY - minPlayerLocalCenterY;
+      const maxOffsetY = viewport.top + viewport.height - playerMarginY - maxPlayerLocalCenterY;
 
       offsetX = Math.round(clampOrMidpoint(offsetX, minOffsetX, maxOffsetX));
       offsetY = Math.round(clampOrMidpoint(offsetY, minOffsetY, maxOffsetY));
 
-      const minPlayerScreenX = offsetX + minPlayerCenterX;
-      const maxPlayerScreenX = offsetX + maxPlayerCenterX;
-      const minPlayerScreenY = offsetY + minPlayerCenterY;
-      const maxPlayerScreenY = offsetY + maxPlayerCenterY;
+      const minPlayerWorldX = offsetX + minPlayerLocalCenterX;
+      const maxPlayerWorldX = offsetX + maxPlayerLocalCenterX;
+      const minPlayerWorldY = offsetY + minPlayerLocalCenterY;
+      const maxPlayerWorldY = offsetY + maxPlayerLocalCenterY;
 
-      const minCameraDeltaX = maxPlayerScreenX - (viewport.left + viewport.width - playerMarginX);
-      const maxCameraDeltaX = minPlayerScreenX - (viewport.left + playerMarginX);
-      const minCameraDeltaY = maxPlayerScreenY - (viewport.top + viewport.height - playerMarginY);
-      const maxCameraDeltaY = minPlayerScreenY - (viewport.top + playerMarginY);
+      if (isPortrait) {
+        cameraBaseCenterX = (minPlayerWorldX + maxPlayerWorldX) * 0.5;
+        cameraBaseCenterY = (minPlayerWorldY + maxPlayerWorldY) * 0.5;
+      }
+
+      const leftBound = viewport.left + playerMarginX;
+      const rightBound = viewport.left + viewport.width - playerMarginX;
+      const topBound = viewport.top + playerMarginY;
+      const bottomBound = viewport.top + viewport.height - playerMarginY;
+      const halfViewportWidth = viewportWidth * 0.5;
+      const halfViewportHeight = viewportHeight * 0.5;
+
+      const minCenterX = maxPlayerWorldX - rightBound + halfViewportWidth;
+      const maxCenterX = minPlayerWorldX - leftBound + halfViewportWidth;
+      const minCenterY = maxPlayerWorldY - bottomBound + halfViewportHeight;
+      const maxCenterY = minPlayerWorldY - topBound + halfViewportHeight;
 
       cameraClamp = {
-        minX: viewport.centerX + Math.min(minCameraDeltaX, maxCameraDeltaX),
-        maxX: viewport.centerX + Math.max(minCameraDeltaX, maxCameraDeltaX),
-        minY: viewport.centerY + Math.min(minCameraDeltaY, maxCameraDeltaY),
-        maxY: viewport.centerY + Math.max(minCameraDeltaY, maxCameraDeltaY),
+        minX: Math.min(minCenterX, maxCenterX),
+        maxX: Math.max(minCenterX, maxCenterX),
+        minY: Math.min(minCenterY, maxCenterY),
+        maxY: Math.max(minCenterY, maxCenterY),
       };
     }
 
-    this.applyCameraSway(snapshot, viewport.centerX, viewport.centerY, tileSize, time, cameraClamp);
+    this.applyCameraSway(snapshot, cameraBaseCenterX, cameraBaseCenterY, tileSize, time, cameraClamp);
     const enemyTargetValues = this.getEnemyTargetValues(state);
 
     this.terrainLayer.clear();

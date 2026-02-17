@@ -266,8 +266,6 @@ export class OverlayUI {
 
   private readonly mobileSwipeHint: HTMLElement;
 
-  private readonly mobileGameControls: HTMLElement;
-
   private readonly mobileOpenMenuButton: HTMLButtonElement;
 
   private readonly mobileOpenSettingsButton: HTMLButtonElement;
@@ -404,7 +402,6 @@ export class OverlayUI {
     this.editorDeleteButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-delete');
     this.pauseTestBackButton = asElement<HTMLButtonElement>(this.root, '#btn-test-back-editor');
     this.mobileSwipeHint = asElement<HTMLElement>(this.root, '#mobile-swipe-hint');
-    this.mobileGameControls = asElement<HTMLElement>(this.root, '#mobile-game-controls');
     this.mobileOpenMenuButton = asElement<HTMLButtonElement>(this.root, '#btn-mobile-open-menu');
     this.mobileOpenSettingsButton = asElement<HTMLButtonElement>(this.root, '#btn-mobile-open-settings');
     this.mobileOnlySettings = Array.from(this.root.querySelectorAll<HTMLElement>('[data-mobile-only]'));
@@ -507,10 +504,27 @@ export class OverlayUI {
       </section>
 
       <div class="menu-status" id="menu-status" aria-live="polite"></div>
-      <div class="mobile-game-controls" id="mobile-game-controls" data-mobile-only hidden>
-        <button type="button" id="btn-mobile-open-menu" aria-label="Open pause menu">Menu</button>
-        <button type="button" id="btn-mobile-open-settings" aria-label="Open settings" title="Settings">&#9881;</button>
-      </div>
+      <button
+        type="button"
+        class="mobile-corner-control"
+        id="btn-mobile-open-menu"
+        data-mobile-only
+        aria-label="Open pause menu"
+        hidden
+      >
+        Menu
+      </button>
+      <button
+        type="button"
+        class="mobile-corner-control"
+        id="btn-mobile-open-settings"
+        data-mobile-only
+        aria-label="Open settings"
+        title="Settings"
+        hidden
+      >
+        &#9881;
+      </button>
       <div class="mobile-swipe-hint" id="mobile-swipe-hint" data-mobile-only hidden>
         Swipe anywhere to move.
       </div>
@@ -1271,7 +1285,9 @@ export class OverlayUI {
     this.pauseTestBackButton.hidden = !this.editorTestingPublishLevelId;
     const showSwipeHint = this.isMobileDevice && snapshot.screen === 'playing' && snapshot.gameState.moves === 0;
     this.mobileSwipeHint.hidden = !showSwipeHint;
-    this.mobileGameControls.hidden = !(this.isMobileDevice && snapshot.screen === 'playing');
+    const showMobileCornerControls = this.isMobileDevice && snapshot.screen === 'playing';
+    this.mobileOpenMenuButton.hidden = !showMobileCornerControls;
+    this.mobileOpenSettingsButton.hidden = !showMobileCornerControls;
 
     this.panels.intro.hidden = snapshot.screen !== 'intro';
     this.panels.main.hidden = snapshot.screen !== 'main';

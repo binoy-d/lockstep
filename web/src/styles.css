@@ -486,20 +486,14 @@ kbd {
   text-shadow: 0 0 12px rgba(69, 255, 175, 0.35);
 }
 
-.mobile-game-controls {
+.mobile-corner-control {
   position: absolute;
-  top: calc(8px + var(--safe-top));
-  right: calc(12px + var(--safe-right));
+  bottom: calc(84px + var(--safe-bottom));
   z-index: 8;
-  display: flex;
-  gap: 8px;
   pointer-events: auto;
-}
-
-.mobile-game-controls button {
   width: auto;
-  min-width: 46px;
-  height: 38px;
+  min-width: 58px;
+  height: 42px;
   padding: 0 12px;
   border-radius: 999px;
   border-color: rgba(124, 214, 255, 0.72);
@@ -511,11 +505,16 @@ kbd {
   place-items: center;
 }
 
+#btn-mobile-open-menu {
+  left: calc(10px + var(--safe-left));
+}
+
 #btn-mobile-open-settings {
-  min-width: 38px;
-  width: 38px;
+  right: calc(10px + var(--safe-right));
+  min-width: 42px;
+  width: 42px;
   padding: 0;
-  font-size: 20px;
+  font-size: 22px;
   line-height: 1;
 }
 
@@ -1237,22 +1236,17 @@ button:disabled {
     padding: 6px 10px;
   }
 
-  .mobile-game-controls {
-    top: calc(8px + var(--safe-top));
-    right: calc(10px + var(--safe-right));
-    gap: 6px;
-  }
-
-  .mobile-game-controls button {
+  .mobile-corner-control {
+    bottom: calc(80px + var(--safe-bottom));
     width: auto;
-    height: 34px;
-    min-width: 44px;
+    height: 38px;
+    min-width: 52px;
     font-size: 13px;
   }
 
   #btn-mobile-open-settings {
-    width: 34px;
-    min-width: 34px;
+    width: 38px;
+    min-width: 38px;
     font-size: 18px;
   }
 
