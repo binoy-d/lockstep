@@ -183,8 +183,6 @@ export class OverlayUI {
 
   private readonly hudScoreStatus: HTMLElement;
 
-  private readonly editorSourceSelect: HTMLSelectElement;
-
   private readonly editorIdInput: HTMLInputElement;
 
   private readonly editorWidthInput: HTMLInputElement;
@@ -306,7 +304,6 @@ export class OverlayUI {
     this.hudScoreList = asElement<HTMLOListElement>(this.root, '#hud-score-list');
     this.hudScoreStatus = asElement<HTMLElement>(this.root, '#hud-score-status');
 
-    this.editorSourceSelect = asElement<HTMLSelectElement>(this.root, '#editor-source-level');
     this.editorIdInput = asElement<HTMLInputElement>(this.root, '#editor-level-id');
     this.editorWidthInput = asElement<HTMLInputElement>(this.root, '#editor-width');
     this.editorHeightInput = asElement<HTMLInputElement>(this.root, '#editor-height');
@@ -363,7 +360,6 @@ export class OverlayUI {
               <input id="intro-settings-mobile-flip" type="checkbox" />
               Flip screen horizontally
             </label>
-            <button type="button" id="btn-intro-open-editor">Level Editor</button>
             <button type="button" id="btn-intro-settings-close">Done</button>
           </div>
         </div>
@@ -387,7 +383,6 @@ export class OverlayUI {
           <div class="button-row intro-button-row">
             <button type="button" id="btn-intro-start">Start</button>
             <button type="button" id="btn-intro-level-select">Levels</button>
-            <button type="button" id="btn-intro-level-editor">Level Editor</button>
           </div>
         </aside>
       </section>
@@ -415,7 +410,7 @@ export class OverlayUI {
 
         <div class="button-row">
           <button type="button" id="btn-play">Play</button>
-          <button type="button" id="btn-open-editor">Level Editor</button>
+          <button type="button" id="btn-open-levels">Levels</button>
           <button type="button" id="btn-main-settings">Settings</button>
         </div>
       </section>
@@ -424,7 +419,7 @@ export class OverlayUI {
         <header class="level-select-header">
           <div>
             <h2>Level Select</h2>
-            <p>Pick a map and chase faster solves. Lower moves and time rank higher.</p>
+            <p>Pick a map to play, copy any map into the editor, or create a blank one with +.</p>
           </div>
           <div class="level-select-header-actions">
             <button type="button" id="btn-level-start">Play Selected</button>
@@ -480,7 +475,7 @@ export class OverlayUI {
         <header class="editor-page-header">
           <div>
             <h2>Level Editor</h2>
-            <p>Choose a template, paint tiles, then save and play.</p>
+            <p>Paint tiles, then test and publish.</p>
           </div>
           <div class="editor-page-header-actions">
             <label for="editor-player-name-input">Player Name</label>
@@ -491,16 +486,6 @@ export class OverlayUI {
 
         <div class="editor-page-layout">
           <aside class="editor-sidebar">
-            <section class="editor-card">
-              <h3>Template</h3>
-              <label for="editor-source-level">Base Level</label>
-              <select id="editor-source-level"></select>
-              <div class="button-row editor-card-buttons">
-                <button type="button" id="btn-editor-load">Load</button>
-                <button type="button" id="btn-editor-new">New Blank</button>
-              </div>
-            </section>
-
             <section class="editor-card">
               <h3>Map Setup</h3>
               <label for="editor-level-id">Level ID</label>
@@ -566,24 +551,9 @@ export class OverlayUI {
       this.startFromIntro();
     });
 
-    asElement<HTMLButtonElement>(this.root, '#btn-intro-open-editor').addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.closeIntroSettings();
-      this.openEditorFromCurrentSelection();
-    });
-
     asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select').addEventListener('click', () => {
       this.closeIntroSettings();
-      const opened = this.controller.openLevelSelect();
-      if (opened) {
-        void this.loadScoresForSelectedLevel(true);
-      }
-    });
-
-    asElement<HTMLButtonElement>(this.root, '#btn-intro-level-editor').addEventListener('click', () => {
-      this.closeIntroSettings();
-      this.openEditorFromCurrentSelection();
+      this.openLevelSelectFromMenu();
     });
 
     this.introSettingsButton.addEventListener('click', () => {
@@ -619,8 +589,8 @@ export class OverlayUI {
       this.controller.startSelectedLevel();
     });
 
-    asElement<HTMLButtonElement>(this.root, '#btn-open-editor').addEventListener('click', () => {
-      this.openEditorFromCurrentSelection();
+    asElement<HTMLButtonElement>(this.root, '#btn-open-levels').addEventListener('click', () => {
+      this.openLevelSelectFromMenu();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-main-settings').addEventListener('click', () => {
@@ -657,22 +627,11 @@ export class OverlayUI {
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-pause-level-select').addEventListener('click', () => {
-      const opened = this.controller.openLevelSelect();
-      if (opened) {
-        void this.loadScoresForSelectedLevel(true);
-      }
+      this.openLevelSelectFromMenu();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-pause-settings').addEventListener('click', () => {
       this.controller.openSettings();
-    });
-
-    asElement<HTMLButtonElement>(this.root, '#btn-editor-load').addEventListener('click', () => {
-      this.loadSelectedEditorLevel();
-    });
-
-    asElement<HTMLButtonElement>(this.root, '#btn-editor-new').addEventListener('click', () => {
-      this.resetEditorGrid();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-editor-resize').addEventListener('click', () => {
@@ -877,20 +836,17 @@ export class OverlayUI {
     this.introSettingsPanel.hidden = true;
   }
 
-  private openEditorFromCurrentSelection(): void {
-    const snapshot = this.controller.getSnapshot();
-    const source = snapshot.levels[snapshot.selectedLevelIndex] ?? snapshot.levels[0];
-    if (source) {
-      this.loadLevelIntoEditor(source);
+  private openLevelSelectFromMenu(): void {
+    const opened = this.controller.openLevelSelect();
+    if (opened) {
+      void this.loadScoresForSelectedLevel(true);
     }
-    this.controller.openEditor();
   }
 
   private render(snapshot: ControllerSnapshot): void {
     const screenChanged = this.lastRenderedScreen !== snapshot.screen;
     this.lastSnapshot = snapshot;
     this.syncLevelOptions(snapshot);
-    this.syncEditorSourceOptions(snapshot);
 
     if (screenChanged && snapshot.screen === 'main' && this.editorTestingPublishLevelId) {
       this.returnFromEditorTest();
@@ -1040,10 +996,11 @@ export class OverlayUI {
         menuOption.textContent = `${getLevelLabel(level.id, index)} (${level.id})`;
         this.levelSelect.append(menuOption);
 
-        const levelCard = this.createLevelSelectCard(level, index);
-        this.levelSelectGrid.append(levelCard);
-        this.levelSelectCardButtons.set(index, levelCard);
+        const { container, selectButton } = this.createLevelSelectCard(level, index);
+        this.levelSelectGrid.append(container);
+        this.levelSelectCardButtons.set(index, selectButton);
       });
+      this.levelSelectGrid.append(this.createAddLevelCard());
       this.levelSelect.dataset.signature = signature;
     }
 
@@ -1055,23 +1012,47 @@ export class OverlayUI {
     for (const [index, button] of this.levelSelectCardButtons) {
       const isSelected = index === snapshot.selectedLevelIndex;
       button.classList.toggle('level-card-selected', isSelected);
-      button.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      const card = button.closest('.level-card');
+      if (card) {
+        card.classList.toggle('level-card-selected', isSelected);
+        card.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      }
     }
   }
 
-  private createLevelSelectCard(level: ParsedLevel, index: number): HTMLButtonElement {
-    const card = document.createElement('button');
-    card.type = 'button';
+  private createLevelSelectCard(
+    level: ParsedLevel,
+    index: number,
+  ): { container: HTMLElement; selectButton: HTMLButtonElement } {
+    const card = document.createElement('article');
     card.className = 'level-card';
     card.dataset.levelIndex = String(index);
     card.setAttribute('role', 'option');
-    card.addEventListener('click', () => {
+    card.setAttribute('aria-selected', 'false');
+
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.className = 'level-card-copy';
+    copyButton.textContent = 'Copy';
+    copyButton.title = `Copy ${level.id} into editor`;
+    copyButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openEditorForCopiedLevel(level);
+    });
+    card.append(copyButton);
+
+    const selectButton = document.createElement('button');
+    selectButton.type = 'button';
+    selectButton.className = 'level-card-select';
+    selectButton.addEventListener('click', () => {
       this.controller.setSelectedLevel(index);
       void this.loadScoresForSelectedLevel(true);
     });
-    card.addEventListener('dblclick', () => {
+    selectButton.addEventListener('dblclick', () => {
       this.controller.startLevel(index);
     });
+    card.append(selectButton);
 
     const cardHeader = document.createElement('div');
     cardHeader.className = 'level-card-header';
@@ -1083,7 +1064,7 @@ export class OverlayUI {
     const cardId = document.createElement('span');
     cardId.textContent = level.id;
     cardHeader.append(cardId);
-    card.append(cardHeader);
+    selectButton.append(cardHeader);
 
     const preview = document.createElement('div');
     preview.className = 'level-card-preview';
@@ -1097,28 +1078,32 @@ export class OverlayUI {
         preview.append(cell);
       }
     }
-    card.append(preview);
+    selectButton.append(preview);
 
-    return card;
+    return { container: card, selectButton };
   }
 
-  private syncEditorSourceOptions(snapshot: ControllerSnapshot): void {
-    const signature = snapshot.levels.map((level) => level.id).join('|');
-    if (this.editorSourceSelect.dataset.signature !== signature) {
-      this.editorSourceSelect.innerHTML = '';
-      snapshot.levels.forEach((level, index) => {
-        const option = document.createElement('option');
-        option.value = String(index);
-        option.textContent = `Level ${index + 1} (${level.id})`;
-        this.editorSourceSelect.append(option);
-      });
-      this.editorSourceSelect.dataset.signature = signature;
-    }
+  private createAddLevelCard(): HTMLButtonElement {
+    const addCard = document.createElement('button');
+    addCard.type = 'button';
+    addCard.className = 'level-card level-card-add';
+    addCard.setAttribute('aria-label', 'Create a new blank level');
 
-    const nextValue = String(snapshot.selectedLevelIndex);
-    if (this.editorSourceSelect.value !== nextValue) {
-      this.editorSourceSelect.value = nextValue;
-    }
+    const plus = document.createElement('span');
+    plus.className = 'level-card-add-plus';
+    plus.textContent = '+';
+    addCard.append(plus);
+
+    const label = document.createElement('span');
+    label.className = 'level-card-add-label';
+    label.textContent = 'New Blank Level';
+    addCard.append(label);
+
+    addCard.addEventListener('click', () => {
+      this.openEditorForBlankLevel();
+    });
+
+    return addCard;
   }
 
   private async loadScoresForSelectedLevel(forceRefresh: boolean): Promise<void> {
@@ -1318,39 +1303,23 @@ export class OverlayUI {
     target.title = `${describeTile(this.editorTile)} @ (${x + 1}, ${y + 1})`;
   }
 
-  private loadLevelIntoEditor(level: ParsedLevel): void {
+  private openEditorForCopiedLevel(level: ParsedLevel): void {
     this.editorGrid = cloneGrid(level.grid);
-    this.editorLoadedLevelId = level.id;
-    this.editorIdInput.value =
-      level.id === EDITOR_TEST_LEVEL_ID && this.editorTestingPublishLevelId ? this.editorTestingPublishLevelId : level.id;
-    this.renderEditorGrid();
-    this.showEditorFeedback(`Loaded ${level.id}`);
-  }
-
-  private loadSelectedEditorLevel(): void {
-    const snapshot = this.lastSnapshot;
-    if (!snapshot) {
-      return;
-    }
-
-    const index = Number.parseInt(this.editorSourceSelect.value, 10);
-    const level = snapshot.levels[index];
-    if (!level) {
-      this.showEditorFeedback('Choose a level to load first.', true);
-      return;
-    }
-
-    this.loadLevelIntoEditor(level);
-  }
-
-  private resetEditorGrid(): void {
-    const width = sanitizeDimension(Number.parseInt(this.editorWidthInput.value, 10), this.editorGrid[0]?.length ?? 25);
-    const height = sanitizeDimension(Number.parseInt(this.editorHeightInput.value, 10), this.editorGrid.length || 16);
-
-    this.editorGrid = this.createBlankGrid(width, height);
+    this.editorTestingPublishLevelId = null;
     this.editorLoadedLevelId = null;
     this.editorIdInput.value = this.defaultEditorId();
     this.renderEditorGrid();
+    this.controller.openEditor();
+    this.showEditorFeedback(`Copied ${level.id}. Publish with a new level id.`);
+  }
+
+  private openEditorForBlankLevel(): void {
+    this.editorGrid = this.createBlankGrid(25, 16);
+    this.editorTestingPublishLevelId = null;
+    this.editorLoadedLevelId = null;
+    this.editorIdInput.value = this.defaultEditorId();
+    this.renderEditorGrid();
+    this.controller.openEditor();
     this.showEditorFeedback('Created blank level template.');
   }
 
