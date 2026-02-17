@@ -2,6 +2,14 @@ name: deploy-production
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy-production.yml'
 
 permissions:
   contents: read
@@ -13,7 +21,6 @@ concurrency:
 jobs:
   deploy:
     name: Deploy lockstep.binoy.co
-    if: ${{ github.event.repository.private == false }}
     runs-on:
       - self-hosted
       - lockstep

@@ -585,7 +585,7 @@ export class OverlayUI {
         <div class="level-select-controls">
           <div class="level-select-control-field">
             <label for="level-select-scope-select" class="level-select-search-label">Show</label>
-            <select id="level-select-scope-select">
+            <select id="level-select-scope-select" class="level-select-control-input">
               <option value="all">All levels</option>
               <option value="builtin">Built-in levels</option>
               <option value="mine">Levels I built</option>
@@ -595,6 +595,7 @@ export class OverlayUI {
             <label for="level-select-search-input" class="level-select-search-label">Search by level name</label>
             <input
               id="level-select-search-input"
+              class="level-select-control-input level-select-control-search-input"
               type="search"
               placeholder="e.g. relay, custom, maze"
               autocomplete="off"
@@ -1477,26 +1478,41 @@ export class OverlayUI {
 
   private applyLevelSearchFilter(): void {
     const query = this.levelSelectSearchInput.value.trim().toLowerCase();
+    const queryTokens = query.length > 0 ? query.split(/\s+/).filter((token) => token.length > 0) : [];
     const scope = this.currentLevelFilterScope();
     let visibleCount = 0;
+    const visibleIndices: number[] = [];
 
     for (const [index, card] of this.levelSelectCardContainers) {
       const level = this.lastSnapshot?.levels[index];
       if (!level) {
         card.hidden = true;
+        card.classList.add('level-card-filter-hidden');
+        const option = this.levelSelect.options.item(index);
+        if (option) {
+          option.hidden = true;
+        }
         continue;
       }
 
       const levelName = this.getDisplayLevelName(level, index).toLowerCase();
-      const matchesQuery = query.length === 0 || levelName.includes(query);
+      const searchableText = `${levelName} ${level.id.toLowerCase()}`;
+      const matchesQuery = queryTokens.length === 0 || queryTokens.every((token) => searchableText.includes(token));
       const matchesScope =
         scope === 'all' ||
         (scope === 'builtin' && index < this.builtInLevelCount) ||
         (scope === 'mine' && this.isOwnedByCurrentUser(level.id, index));
       const matches = matchesQuery && matchesScope;
       card.hidden = !matches;
+      card.classList.toggle('level-card-filter-hidden', !matches);
+      card.setAttribute('aria-hidden', matches ? 'false' : 'true');
+      const option = this.levelSelect.options.item(index);
+      if (option) {
+        option.hidden = !matches;
+      }
       if (matches) {
         visibleCount += 1;
+        visibleIndices.push(index);
       }
     }
 
@@ -1523,9 +1539,7 @@ export class OverlayUI {
       return;
     }
 
-    const firstVisible = Array.from(this.levelSelectCardContainers.entries()).find(
-      ([, container]) => !container.hidden,
-    )?.[0];
+    const firstVisible = visibleIndices[0];
     if (firstVisible === undefined || firstVisible === snapshot.selectedLevelIndex) {
       return;
     }
