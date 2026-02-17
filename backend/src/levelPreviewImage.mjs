@@ -12,6 +12,57 @@ const TILE_COLORS = {
   path: [120, 32, 53],
 };
 
+const FONT_5X7 = {
+  ' ': ['00000', '00000', '00000', '00000', '00000', '00000', '00000'],
+  '-': ['00000', '00000', '00000', '11111', '00000', '00000', '00000'],
+  ':': ['00000', '00100', '00100', '00000', '00100', '00100', '00000'],
+  '.': ['00000', '00000', '00000', '00000', '00000', '00100', '00100'],
+  '/': ['00001', '00010', '00100', '01000', '10000', '00000', '00000'],
+  "'": ['00100', '00100', '00000', '00000', '00000', '00000', '00000'],
+  '?': ['01110', '10001', '00001', '00010', '00100', '00000', '00100'],
+  '!': ['00100', '00100', '00100', '00100', '00100', '00000', '00100'],
+  A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
+  B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
+  C: ['01110', '10001', '10000', '10000', '10000', '10001', '01110'],
+  D: ['11110', '10001', '10001', '10001', '10001', '10001', '11110'],
+  E: ['11111', '10000', '10000', '11110', '10000', '10000', '11111'],
+  F: ['11111', '10000', '10000', '11110', '10000', '10000', '10000'],
+  G: ['01110', '10001', '10000', '10111', '10001', '10001', '01110'],
+  H: ['10001', '10001', '10001', '11111', '10001', '10001', '10001'],
+  I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'],
+  J: ['00111', '00010', '00010', '00010', '10010', '10010', '01100'],
+  K: ['10001', '10010', '10100', '11000', '10100', '10010', '10001'],
+  L: ['10000', '10000', '10000', '10000', '10000', '10000', '11111'],
+  M: ['10001', '11011', '10101', '10101', '10001', '10001', '10001'],
+  N: ['10001', '11001', '10101', '10011', '10001', '10001', '10001'],
+  O: ['01110', '10001', '10001', '10001', '10001', '10001', '01110'],
+  P: ['11110', '10001', '10001', '11110', '10000', '10000', '10000'],
+  Q: ['01110', '10001', '10001', '10001', '10101', '10010', '01101'],
+  R: ['11110', '10001', '10001', '11110', '10100', '10010', '10001'],
+  S: ['01111', '10000', '10000', '01110', '00001', '00001', '11110'],
+  T: ['11111', '00100', '00100', '00100', '00100', '00100', '00100'],
+  U: ['10001', '10001', '10001', '10001', '10001', '10001', '01110'],
+  V: ['10001', '10001', '10001', '10001', '10001', '01010', '00100'],
+  W: ['10001', '10001', '10001', '10101', '10101', '10101', '01010'],
+  X: ['10001', '10001', '01010', '00100', '01010', '10001', '10001'],
+  Y: ['10001', '10001', '01010', '00100', '00100', '00100', '00100'],
+  Z: ['11111', '00001', '00010', '00100', '01000', '10000', '11111'],
+  '0': ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
+  '1': ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  '2': ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
+  '3': ['11110', '00001', '00001', '01110', '00001', '00001', '11110'],
+  '4': ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
+  '5': ['11111', '10000', '10000', '11110', '00001', '00001', '11110'],
+  '6': ['01110', '10000', '10000', '11110', '10001', '10001', '01110'],
+  '7': ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+  '8': ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
+  '9': ['01110', '10001', '10001', '01111', '00001', '00001', '01110'],
+};
+
+const FONT_WIDTH = 5;
+const FONT_HEIGHT = 7;
+const FONT_SPACING = 1;
+
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -85,6 +136,32 @@ function setPixel(buffer, width, height, x, y, red, green, blue, alpha = 255) {
   buffer[offset + 3] = alpha;
 }
 
+function blendPixel(buffer, width, height, x, y, red, green, blue, alpha = 255) {
+  if (x < 0 || y < 0 || x >= width || y >= height) {
+    return;
+  }
+
+  const offset = (y * width + x) * 4;
+  const srcAlpha = Math.max(0, Math.min(255, alpha)) / 255;
+  if (srcAlpha <= 0) {
+    return;
+  }
+
+  const dstAlpha = buffer[offset + 3] / 255;
+  const outAlpha = srcAlpha + dstAlpha * (1 - srcAlpha);
+  if (outAlpha <= 0) {
+    return;
+  }
+
+  const dstFactor = (dstAlpha * (1 - srcAlpha)) / outAlpha;
+  const srcFactor = srcAlpha / outAlpha;
+
+  buffer[offset] = Math.round(red * srcFactor + buffer[offset] * dstFactor);
+  buffer[offset + 1] = Math.round(green * srcFactor + buffer[offset + 1] * dstFactor);
+  buffer[offset + 2] = Math.round(blue * srcFactor + buffer[offset + 2] * dstFactor);
+  buffer[offset + 3] = Math.round(outAlpha * 255);
+}
+
 function fillRect(buffer, width, height, x, y, rectWidth, rectHeight, color) {
   const [red, green, blue, alpha = 255] = color;
   const startX = Math.max(0, Math.floor(x));
@@ -98,6 +175,19 @@ function fillRect(buffer, width, height, x, y, rectWidth, rectHeight, color) {
   }
 }
 
+function fillRectBlend(buffer, width, height, x, y, rectWidth, rectHeight, color) {
+  const [red, green, blue, alpha = 255] = color;
+  const startX = Math.max(0, Math.floor(x));
+  const startY = Math.max(0, Math.floor(y));
+  const endX = Math.min(width, Math.ceil(x + rectWidth));
+  const endY = Math.min(height, Math.ceil(y + rectHeight));
+  for (let row = startY; row < endY; row += 1) {
+    for (let col = startX; col < endX; col += 1) {
+      blendPixel(buffer, width, height, col, row, red, green, blue, alpha);
+    }
+  }
+}
+
 function fillVerticalGradient(buffer, width, height, topColor, bottomColor) {
   for (let row = 0; row < height; row += 1) {
     const t = row / Math.max(1, height - 1);
@@ -106,6 +196,34 @@ function fillVerticalGradient(buffer, width, height, topColor, bottomColor) {
     const blue = Math.round(topColor[2] + (bottomColor[2] - topColor[2]) * t);
     for (let col = 0; col < width; col += 1) {
       setPixel(buffer, width, height, col, row, red, green, blue, 255);
+    }
+  }
+}
+
+function drawRadialGlow(buffer, centerX, centerY, radius, color, maxAlpha = 1) {
+  const [red, green, blue] = color;
+  const startX = Math.max(0, Math.floor(centerX - radius));
+  const endX = Math.min(PREVIEW_WIDTH - 1, Math.ceil(centerX + radius));
+  const startY = Math.max(0, Math.floor(centerY - radius));
+  const endY = Math.min(PREVIEW_HEIGHT - 1, Math.ceil(centerY + radius));
+  const radiusSquared = radius * radius;
+
+  for (let row = startY; row <= endY; row += 1) {
+    const dy = row - centerY;
+    for (let col = startX; col <= endX; col += 1) {
+      const dx = col - centerX;
+      const distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared > radiusSquared) {
+        continue;
+      }
+
+      const falloff = 1 - Math.sqrt(distanceSquared) / radius;
+      const alpha = Math.round(Math.max(0, Math.min(1, falloff * falloff * maxAlpha)) * 255);
+      if (alpha <= 0) {
+        continue;
+      }
+
+      blendPixel(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, col, row, red, green, blue, alpha);
     }
   }
 }
@@ -147,6 +265,128 @@ function tileColor(tile) {
   return TILE_COLORS[' '];
 }
 
+function normalizePreviewText(value, fallback = '') {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function textWidth(text, scale = 1) {
+  if (!text || text.length === 0) {
+    return 0;
+  }
+
+  const pixelWidth = text.length * FONT_WIDTH + Math.max(0, text.length - 1) * FONT_SPACING;
+  return pixelWidth * scale;
+}
+
+function drawGlyph(buffer, glyph, x, y, scale, color) {
+  for (let row = 0; row < FONT_HEIGHT; row += 1) {
+    const bitmapRow = glyph[row] ?? '00000';
+    for (let col = 0; col < FONT_WIDTH; col += 1) {
+      if (bitmapRow[col] !== '1') {
+        continue;
+      }
+
+      fillRect(
+        buffer,
+        PREVIEW_WIDTH,
+        PREVIEW_HEIGHT,
+        x + col * scale,
+        y + row * scale,
+        scale,
+        scale,
+        color,
+      );
+    }
+  }
+}
+
+function drawTextLine(buffer, text, x, y, scale, color, shadowColor = null, shadowOffset = 0) {
+  const normalizedText = String(text ?? '').toUpperCase();
+  const advance = (FONT_WIDTH + FONT_SPACING) * scale;
+
+  if (shadowColor && shadowOffset > 0) {
+    let shadowCursor = x + shadowOffset;
+    for (const char of normalizedText) {
+      const glyph = FONT_5X7[char] ?? FONT_5X7['?'];
+      drawGlyph(buffer, glyph, shadowCursor, y + shadowOffset, scale, shadowColor);
+      shadowCursor += advance;
+    }
+  }
+
+  let cursorX = x;
+  for (const char of normalizedText) {
+    const glyph = FONT_5X7[char] ?? FONT_5X7['?'];
+    drawGlyph(buffer, glyph, cursorX, y, scale, color);
+    cursorX += advance;
+  }
+}
+
+function wrapText(text, maxCharsPerLine, maxLines = 3) {
+  const normalized = normalizePreviewText(text);
+  if (!normalized) {
+    return [];
+  }
+
+  const words = normalized.split(' ');
+  const lines = [];
+  let current = '';
+
+  for (const rawWord of words) {
+    let word = rawWord;
+    while (word.length > maxCharsPerLine) {
+      const head = word.slice(0, maxCharsPerLine);
+      const tail = word.slice(maxCharsPerLine);
+      if (current.length > 0) {
+        lines.push(current);
+        current = '';
+      }
+      lines.push(head);
+      word = tail;
+      if (lines.length >= maxLines) {
+        break;
+      }
+    }
+    if (lines.length >= maxLines) {
+      break;
+    }
+
+    const candidate = current.length > 0 ? `${current} ${word}` : word;
+    if (candidate.length <= maxCharsPerLine) {
+      current = candidate;
+      continue;
+    }
+
+    if (current.length > 0) {
+      lines.push(current);
+    }
+    current = word;
+
+    if (lines.length >= maxLines) {
+      break;
+    }
+  }
+
+  if (lines.length < maxLines && current.length > 0) {
+    lines.push(current);
+  }
+
+  if (lines.length > maxLines) {
+    lines.length = maxLines;
+  }
+
+  if (lines.length === maxLines) {
+    const lastLine = lines[maxLines - 1];
+    if (lastLine.length > maxCharsPerLine) {
+      lines[maxLines - 1] = `${lastLine.slice(0, Math.max(0, maxCharsPerLine - 3))}...`;
+    }
+  }
+
+  return lines;
+}
+
 function drawLevelMiniMap(buffer, grid) {
   const rows = grid.length;
   const cols = grid[0].length;
@@ -177,7 +417,7 @@ function drawLevelMiniMap(buffer, grid) {
   const tileAreaHeight = cardHeight - innerPadding * 2;
   fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, tileAreaX, tileAreaY, tileAreaWidth, tileAreaHeight, [6, 11, 17, 255]);
 
-  const gap = 1;
+  const gap = 0;
   const tileSize = Math.max(
     2,
     Math.floor(
@@ -209,36 +449,107 @@ function drawLevelMiniMap(buffer, grid) {
   }
 }
 
-function drawAccentPanel(buffer, levelName) {
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 626, 108, 486, 74, [10, 28, 48, 185]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 626, 204, 486, 150, [8, 20, 34, 170]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 626, 372, 486, 212, [6, 16, 28, 165]);
+function drawAccentPanel(buffer, levelName, levelId) {
+  const panelX = 622;
+  const panelY = 76;
+  const panelWidth = 500;
+  const panelHeight = 508;
+  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 4, panelY + 18, panelWidth - 8, 170, [5, 16, 31, 172]);
+  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 4, panelY + 252, panelWidth - 8, 240, [5, 16, 31, 184]);
+  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 22, panelY + 30, 364, 10, [96, 227, 255, 235]);
+  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 22, panelY + 48, 434, 6, [136, 216, 255, 230]);
+  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, panelX + 22, panelY + 134, 456, 6, [96, 190, 235, 220]);
 
-  // Accent bars on the right side to keep share art recognizable without text rendering.
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 130, 350, 14, [94, 223, 255, 240]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 156, 410, 10, [140, 215, 255, 220]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 228, 450, 10, [102, 174, 214, 205]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 248, 385, 10, [102, 174, 214, 190]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 392, 458, 12, [98, 238, 194, 220]);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 416, 320, 8, [161, 220, 255, 200]);
+  drawTextLine(
+    buffer,
+    'LOCKSTEP',
+    panelX + 20,
+    panelY + 64,
+    8,
+    [234, 246, 255, 255],
+    [22, 62, 94, 210],
+    3,
+  );
+  drawTextLine(
+    buffer,
+    'MOVE TO THE GOAL',
+    panelX + 22,
+    panelY + 164,
+    3,
+    [101, 234, 255, 255],
+    [12, 58, 84, 210],
+    2,
+  );
+  drawTextLine(
+    buffer,
+    'AVOID LAVA. DODGE ENEMIES.',
+    panelX + 22,
+    panelY + 198,
+    2,
+    [165, 203, 235, 240],
+    [10, 38, 62, 160],
+    1,
+  );
 
-  const normalizedName = String(levelName || '').trim();
-  const hashSeed = normalizedName
-    .split('')
-    .reduce((seed, char) => ((seed << 5) - seed + char.charCodeAt(0)) | 0, 0);
-  const accentWidth = 220 + Math.abs(hashSeed % 190);
-  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, 648, 444, accentWidth, 8, [161, 220, 255, 186]);
+  const levelCardX = panelX + 20;
+  const levelCardY = panelY + 286;
+  const levelCardWidth = panelWidth - 40;
+  const levelCardHeight = 194;
+  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, levelCardX, levelCardY, levelCardWidth, levelCardHeight, [6, 18, 33, 198]);
+  fillRect(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, levelCardX, levelCardY, levelCardWidth, 2, [102, 243, 192, 220]);
+  fillRect(
+    buffer,
+    PREVIEW_WIDTH,
+    PREVIEW_HEIGHT,
+    levelCardX,
+    levelCardY + levelCardHeight - 2,
+    levelCardWidth,
+    2,
+    [102, 243, 192, 190],
+  );
+
+  drawTextLine(
+    buffer,
+    'LEVEL',
+    levelCardX + 16,
+    levelCardY + 16,
+    3,
+    [121, 247, 199, 255],
+    [16, 56, 47, 220],
+    1,
+  );
+
+  const displayLevelName = normalizePreviewText(levelName, normalizePreviewText(levelId, 'UNKNOWN LEVEL')).toUpperCase();
+  const levelNameLines = wrapText(displayLevelName, 24, 2);
+  let levelNameY = levelCardY + 56;
+  for (const line of levelNameLines) {
+    drawTextLine(buffer, line, levelCardX + 16, levelNameY, 3, [238, 246, 255, 250], [24, 40, 62, 180], 1);
+    levelNameY += (FONT_HEIGHT + 1) * 3;
+  }
+
+  const normalizedLevelId = normalizePreviewText(levelId, 'unknown-level').toUpperCase();
+  drawTextLine(
+    buffer,
+    `ID: ${normalizedLevelId}`,
+    levelCardX + 16,
+    levelCardY + levelCardHeight - 36,
+    2,
+    [148, 196, 231, 240],
+  );
 }
 
 export function renderLevelPreviewPng(level) {
   const pixels = Buffer.alloc(PREVIEW_WIDTH * PREVIEW_HEIGHT * 4);
   fillVerticalGradient(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, [6, 22, 44], [8, 10, 24]);
+  drawRadialGlow(pixels, 780, 320, 500, [84, 212, 206], 0.34);
+  drawRadialGlow(pixels, 320, 120, 360, [35, 102, 188], 0.22);
+  drawRadialGlow(pixels, 1170, 590, 260, [95, 220, 190], 0.2);
 
   for (let x = 0; x < PREVIEW_WIDTH; x += 88) {
-    fillRect(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, x, 0, 1, PREVIEW_HEIGHT, [60, 117, 165, 50]);
+    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, x, 0, 1, PREVIEW_HEIGHT, [60, 117, 165, 130]);
   }
   for (let y = 0; y < PREVIEW_HEIGHT; y += 84) {
-    fillRect(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 0, y, PREVIEW_WIDTH, 1, [60, 117, 165, 40]);
+    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 0, y, PREVIEW_WIDTH, 1, [60, 117, 165, 118]);
   }
 
   const grid = parseGrid(level?.text);
@@ -249,6 +560,6 @@ export function renderLevelPreviewPng(level) {
     fillRect(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 118, 110, 448, 448, [23, 31, 45, 255]);
   }
 
-  drawAccentPanel(pixels, level?.name ?? level?.id ?? 'LOCKSTEP');
+  drawAccentPanel(pixels, level?.name ?? level?.id ?? 'LOCKSTEP', level?.id ?? 'unknown-level');
   return encodePng(PREVIEW_WIDTH, PREVIEW_HEIGHT, pixels);
 }
