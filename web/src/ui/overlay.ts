@@ -126,10 +126,16 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+interface OverlayUiOptions {
+  builtInLevelCount?: number;
+}
+
 export class OverlayUI {
   private readonly root: HTMLElement;
 
   private readonly controller: GameController;
+
+  private readonly builtInLevelCount: number;
 
   private readonly levelSelect: HTMLSelectElement;
 
@@ -283,9 +289,11 @@ export class OverlayUI {
 
   private levelSelectCardButtons = new Map<number, HTMLButtonElement>();
 
-  public constructor(root: HTMLElement, controller: GameController) {
+  public constructor(root: HTMLElement, controller: GameController, options: OverlayUiOptions = {}) {
     this.root = root;
     this.controller = controller;
+    const totalLevels = controller.getSnapshot().levels.length;
+    this.builtInLevelCount = Math.max(0, Math.min(options.builtInLevelCount ?? 0, totalLevels));
 
     this.root.innerHTML = this.buildMarkup();
 
@@ -1296,7 +1304,9 @@ export class OverlayUI {
   }
 
   private syncLevelOptions(snapshot: ControllerSnapshot): void {
-    const signature = snapshot.levels.map((level) => level.id).join('|');
+    const levelIdsSignature = snapshot.levels.map((level) => level.id).join('|');
+    const adminSignature = this.authState.user?.isAdmin ? 'admin' : 'default';
+    const signature = `${levelIdsSignature}::${adminSignature}`;
     if (this.levelSelect.dataset.signature !== signature) {
       this.levelSelect.innerHTML = '';
       this.levelSelectGrid.innerHTML = '';
@@ -1341,6 +1351,10 @@ export class OverlayUI {
     card.setAttribute('role', 'option');
     card.setAttribute('aria-selected', 'false');
 
+    const actions = document.createElement('div');
+    actions.className = 'level-card-actions';
+    card.append(actions);
+
     const copyButton = document.createElement('button');
     copyButton.type = 'button';
     copyButton.className = 'level-card-copy';
@@ -1351,7 +1365,23 @@ export class OverlayUI {
       event.stopPropagation();
       this.openEditorForCopiedLevel(level);
     });
-    card.append(copyButton);
+    actions.append(copyButton);
+
+    const isBuiltInLevel = index < this.builtInLevelCount;
+    const isAdmin = Boolean(this.authState.user?.isAdmin);
+    if (!isBuiltInLevel && isAdmin) {
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'level-card-delete';
+      deleteButton.textContent = 'Delete';
+      deleteButton.title = `Delete ${level.id}`;
+      deleteButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this.deleteLevelFromLevelSelect(level.id);
+      });
+      actions.append(deleteButton);
+    }
 
     const selectButton = document.createElement('button');
     selectButton.type = 'button';
@@ -1392,6 +1422,33 @@ export class OverlayUI {
     selectButton.append(preview);
 
     return { container: card, selectButton };
+  }
+
+  private async deleteLevelFromLevelSelect(levelId: string): Promise<void> {
+    if (!this.authState.authenticated || !this.authState.user?.isAdmin) {
+      this.statusText.textContent = 'Admin sign-in required to delete levels.';
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete published level "${levelId}" permanently?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteCustomLevel({ levelId });
+      this.scoreCache.delete(levelId);
+      const removed = this.controller.removeLevel(levelId);
+      if (!removed) {
+        this.statusText.textContent = `Level ${levelId} was not found in local state.`;
+        return;
+      }
+
+      this.statusText.textContent = `Deleted ${levelId}.`;
+      void this.loadScoresForSelectedLevel(true);
+    } catch (error) {
+      this.statusText.textContent = `Delete failed: ${formatError(error)}`;
+    }
   }
 
   private createAddLevelCard(): HTMLButtonElement {

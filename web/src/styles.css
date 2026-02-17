@@ -742,16 +742,40 @@ button:disabled {
 }
 
 .level-card-copy {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 1;
   min-width: auto;
   padding: 5px 9px;
   border-radius: 999px;
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.level-card-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.level-card-delete {
+  min-width: auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-color: rgba(255, 132, 150, 0.64);
+  color: #ffd6de;
+  background: rgba(46, 14, 20, 0.9);
+}
+
+.level-card-delete:hover,
+.level-card-delete:focus-visible {
+  border-color: rgba(255, 132, 150, 0.9);
+  background: rgba(66, 18, 28, 0.92);
 }
 
 .level-card.level-card-selected {
@@ -1229,6 +1253,10 @@ button:disabled {
   }
 
   .level-card-copy {
+    width: auto;
+  }
+
+  .level-card-delete {
     width: auto;
   }
 

@@ -57,7 +57,9 @@ async function bootstrap(): Promise<void> {
     throw new Error('Missing #menu-root element.');
   }
 
-  new OverlayUI(menuRoot, controller);
+  new OverlayUI(menuRoot, controller, {
+    builtInLevelCount: builtInLevels.length,
+  });
 }
 
 bootstrap().catch((error) => {
