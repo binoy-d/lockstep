@@ -10,6 +10,7 @@ services:
       - "8787:8787"
     volumes:
       - backend-data:/app/data
+    restart: unless-stopped
 
   web:
     build:
@@ -21,6 +22,7 @@ services:
       VITE_PROXY_TARGET: http://backend:8787
     ports:
       - "5173:5173"
+    restart: unless-stopped
 
 volumes:
   backend-data:

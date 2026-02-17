@@ -310,6 +310,7 @@ export class OverlayUI {
           <div class="button-row intro-button-row">
             <button type="button" id="btn-intro-start">Start</button>
             <button type="button" id="btn-intro-level-select">Levels</button>
+            <button type="button" id="btn-intro-level-editor">Level Editor</button>
           </div>
         </aside>
       </section>
@@ -472,18 +473,18 @@ export class OverlayUI {
       event.preventDefault();
       event.stopPropagation();
       this.closeIntroSettings();
-      const snapshot = this.controller.getSnapshot();
-      const source = snapshot.levels[snapshot.selectedLevelIndex] ?? snapshot.levels[0];
-      if (source) {
-        this.loadLevelIntoEditor(source);
-      }
-      this.controller.openEditor();
+      this.openEditorFromCurrentSelection();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select').addEventListener('click', () => {
       this.closeIntroSettings();
       this.controller.openLevelSelect();
       void this.loadScoresForSelectedLevel(true);
+    });
+
+    asElement<HTMLButtonElement>(this.root, '#btn-intro-level-editor').addEventListener('click', () => {
+      this.closeIntroSettings();
+      this.openEditorFromCurrentSelection();
     });
 
     this.introSettingsButton.addEventListener('click', () => {
@@ -520,12 +521,7 @@ export class OverlayUI {
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-open-editor').addEventListener('click', () => {
-      const snapshot = this.controller.getSnapshot();
-      const source = snapshot.levels[snapshot.selectedLevelIndex] ?? snapshot.levels[0];
-      if (source) {
-        this.loadLevelIntoEditor(source);
-      }
-      this.controller.openEditor();
+      this.openEditorFromCurrentSelection();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-main-settings').addEventListener('click', () => {
@@ -709,6 +705,15 @@ export class OverlayUI {
 
   private closeIntroSettings(): void {
     this.introSettingsPanel.hidden = true;
+  }
+
+  private openEditorFromCurrentSelection(): void {
+    const snapshot = this.controller.getSnapshot();
+    const source = snapshot.levels[snapshot.selectedLevelIndex] ?? snapshot.levels[0];
+    if (source) {
+      this.loadLevelIntoEditor(source);
+    }
+    this.controller.openEditor();
   }
 
   private render(snapshot: ControllerSnapshot): void {
