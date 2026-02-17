@@ -18,17 +18,23 @@ jobs:
     environment: production
 
     steps:
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
       - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          password: ${{ secrets.DEPLOY_PASSWORD }}
-          script_stop: true
-          timeout: 30m
-          command_timeout: 30m
-          script: |
-            set -euo pipefail
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PASSWORD: ${{ secrets.DEPLOY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sshpass -p "$DEPLOY_PASSWORD" ssh \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'set -euo pipefail
             cd /home/daniel/dev/lockstep
             current_branch=$(git branch --show-current)
             if [ "$current_branch" != "main" ]; then
@@ -37,4 +43,4 @@ jobs:
             git fetch origin main
             git pull --ff-only origin main
             docker-compose up -d --build
-            docker-compose ps
+            docker-compose ps'
