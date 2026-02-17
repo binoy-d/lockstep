@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createDatabase } from '../src/db.mjs';
 
@@ -88,6 +89,44 @@ test('deletes a level and its scores', () => {
   assert.equal(db.listLevels().some((level) => level.id === 'custom-level-99'), false);
   assert.equal(db.getTopScores('custom-level-99', 10).length, 0);
   assert.equal(db.deleteLevel('custom-level-99'), false);
+
+  rmSync(path, { force: true });
+});
+
+test('normalizes legacy offensive player names on startup', () => {
+  const path = makeTempPath('legacy-cleanup');
+  const sqlite = new DatabaseSync(path);
+  sqlite.exec(`
+    CREATE TABLE user_levels (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      text TEXT NOT NULL,
+      author_name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE level_scores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level_id TEXT NOT NULL,
+      player_name TEXT NOT NULL,
+      moves INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+  sqlite.exec(`
+    INSERT INTO user_levels(id, name, text, author_name, created_at, updated_at)
+    VALUES ('map-x', 'Map X', '###\\n#P!\\n###', 'GAY', 1, 1);
+    INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
+    VALUES ('map-x', 'GAY', 12, 1200, 1);
+  `);
+  sqlite.close();
+
+  const db = createDatabase(path);
+  const levels = db.listLevels();
+  const scores = db.getTopScores('map-x', 10);
+  assert.equal(levels[0].authorName, 'Issac');
+  assert.equal(scores[0].playerName, 'Issac');
 
   rmSync(path, { force: true });
 });

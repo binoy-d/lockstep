@@ -13,9 +13,10 @@ import {
   pathDistanceFromNextHit,
 } from './enemyPathVisuals';
 import { isTextInputFocused } from './inputFocus';
-import { resolveCameraRumble } from './cameraRumble';
+import { resolveCameraSwayImpulse } from './cameraRumble';
 import { LEVEL_TRANSITION_PROFILE, shouldTriggerLevelTransition } from './levelTransition';
 import { getLevelLabel } from './levelMeta';
+import type { Direction, GameState } from '../core/types';
 
 const FIXED_STEP_MS = 1000 / 60;
 const MIN_TILE_SIZE = 22;
@@ -40,6 +41,13 @@ function fract(value: number): number {
   return value - Math.floor(value);
 }
 
+function isLikelyMobileDevice(): boolean {
+  const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const userAgent = navigator.userAgent.toLowerCase();
+  const hasMobileUserAgent = /android|iphone|ipad|ipod|mobile/.test(userAgent);
+  return hasCoarsePointer || hasMobileUserAgent;
+}
+
 class PuzzleScene extends Phaser.Scene {
   private readonly controller: GameController;
 
@@ -57,6 +65,8 @@ class PuzzleScene extends Phaser.Scene {
 
   private transitionText!: Phaser.GameObjects.Text;
 
+  private fpsText!: Phaser.GameObjects.Text;
+
   private accumulator = 0;
 
   private lastStateRef: ControllerSnapshot['gameState'] | null = null;
@@ -67,9 +77,25 @@ class PuzzleScene extends Phaser.Scene {
 
   private transitionZoomTween: Phaser.Tweens.Tween | null = null;
 
-  private lastRumbleAtMs = 0;
-
   private winTransitionVisualActive = false;
+
+  private cameraSwayVelocityX = 0;
+
+  private cameraSwayVelocityY = 0;
+
+  private cameraSwayOffsetX = 0;
+
+  private cameraSwayOffsetY = 0;
+
+  private lastFpsSampleAtMs = 0;
+
+  private readonly isMobileDevice = isLikelyMobileDevice();
+
+  private swipeStart: { x: number; y: number; pointerId: number; startedAtMs: number } | null = null;
+
+  private cachedEnemyTargetsStateRef: GameState | null = null;
+
+  private cachedEnemyTargetValues: number[] = [];
 
   public constructor(controller: GameController) {
     super('PuzzleScene');
@@ -114,15 +140,26 @@ class PuzzleScene extends Phaser.Scene {
       .setOrigin(0.5, 0.5)
       .setVisible(false)
       .setShadow(0, 2, '#00130d', 12, false, true);
+    this.fpsText = this.add
+      .text(0, 0, '', {
+        fontFamily: 'system-ui, sans-serif',
+        color: '#d6e5f7',
+        fontSize: '11px',
+      })
+      .setDepth(8)
+      .setScrollFactor(0)
+      .setOrigin(1, 0)
+      .setAlpha(0.72)
+      .setVisible(false);
 
     this.registerInput();
   }
 
   public update(time: number, delta: number): void {
-    this.accumulator += delta;
+    this.accumulator += Math.min(delta, 100);
 
     let guard = 0;
-    while (this.accumulator >= FIXED_STEP_MS && guard < 5) {
+    while (this.accumulator >= FIXED_STEP_MS && guard < 6) {
       this.controller.fixedUpdate(FIXED_STEP_MS);
       this.accumulator -= FIXED_STEP_MS;
       guard += 1;
@@ -141,27 +178,95 @@ class PuzzleScene extends Phaser.Scene {
         case 'ArrowUp':
         case 'KeyW':
           event.preventDefault();
-          this.controller.queueDirection('up');
+          this.queueDirectionWithSettings('up');
           break;
         case 'ArrowDown':
         case 'KeyS':
           event.preventDefault();
-          this.controller.queueDirection('down');
+          this.queueDirectionWithSettings('down');
           break;
         case 'ArrowLeft':
         case 'KeyA':
           event.preventDefault();
-          this.controller.queueDirection('left');
+          this.queueDirectionWithSettings('left');
           break;
         case 'ArrowRight':
         case 'KeyD':
           event.preventDefault();
-          this.controller.queueDirection('right');
+          this.queueDirectionWithSettings('right');
           break;
         default:
           break;
       }
     });
+
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (!this.isMobileDevice || this.controller.getSnapshot().screen !== 'playing') {
+        return;
+      }
+
+      this.swipeStart = {
+        x: pointer.x,
+        y: pointer.y,
+        pointerId: pointer.id,
+        startedAtMs: performance.now(),
+      };
+    });
+
+    this.input.on('pointerup', (pointer: Phaser.Input.Pointer) => {
+      if (!this.isMobileDevice || !this.swipeStart || this.swipeStart.pointerId !== pointer.id) {
+        return;
+      }
+
+      const elapsedMs = performance.now() - this.swipeStart.startedAtMs;
+      const dx = pointer.x - this.swipeStart.x;
+      const dy = pointer.y - this.swipeStart.y;
+      this.swipeStart = null;
+
+      if (elapsedMs > 700) {
+        return;
+      }
+
+      const minDistancePx = 24;
+      if (Math.abs(dx) < minDistancePx && Math.abs(dy) < minDistancePx) {
+        return;
+      }
+
+      const horizontal = Math.abs(dx) > Math.abs(dy);
+      const direction: Direction = horizontal ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
+      this.queueDirectionWithSettings(direction);
+    });
+  }
+
+  private mapDirectionForSettings(direction: Direction): Direction {
+    const settings = this.controller.getSnapshot().settings;
+    if (!settings.mobileFlipHorizontal) {
+      return direction;
+    }
+
+    if (direction === 'left') {
+      return 'right';
+    }
+    if (direction === 'right') {
+      return 'left';
+    }
+
+    return direction;
+  }
+
+  private queueDirectionWithSettings(direction: Direction): void {
+    this.controller.queueDirection(this.mapDirectionForSettings(direction));
+  }
+
+  private getEnemyTargetValues(state: GameState): number[] {
+    if (this.cachedEnemyTargetsStateRef === state) {
+      return this.cachedEnemyTargetValues;
+    }
+
+    const enemyPathTargets = collectEnemyPathTargets(state.enemies, state.grid);
+    this.cachedEnemyTargetsStateRef = state;
+    this.cachedEnemyTargetValues = enemyPathTargets.map((target) => target.value);
+    return this.cachedEnemyTargetValues;
   }
 
   private computeLegacyGlow(
@@ -213,7 +318,6 @@ class PuzzleScene extends Phaser.Scene {
     time: number,
   ): void {
     this.applyLevelTransition(snapshot);
-    this.applyCameraRumble(snapshot);
 
     const state = snapshot.gameState;
     const levelHeight = state.grid.length;
@@ -224,8 +328,8 @@ class PuzzleScene extends Phaser.Scene {
     const boardHeight = levelHeight * tileSize;
     const offsetX = Math.floor((viewportWidth - boardWidth) / 2);
     const offsetY = Math.floor((viewportHeight - boardHeight) / 2);
-    const enemyPathTargets = collectEnemyPathTargets(state.enemies, state.grid);
-    const enemyTargetValues = enemyPathTargets.map((target) => target.value);
+    this.applyCameraSway(snapshot, viewportWidth, viewportHeight, tileSize, time);
+    const enemyTargetValues = this.getEnemyTargetValues(state);
 
     this.terrainLayer.clear();
     this.entityLayer.clear();
@@ -369,6 +473,7 @@ class PuzzleScene extends Phaser.Scene {
     this.hudText.setText(
       `${getLevelLabel(state.levelId, state.levelIndex)} (${state.levelIndex + 1}/${state.levelIds.length})  Moves ${state.moves}  Players ${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}`,
     );
+    this.updateFpsLabel(snapshot, viewportWidth, time);
   }
 
   private computeBoardPlacement(
@@ -748,23 +853,63 @@ class PuzzleScene extends Phaser.Scene {
     });
   }
 
-  private applyCameraRumble(snapshot: ControllerSnapshot): void {
+  private applyCameraSway(
+    snapshot: ControllerSnapshot,
+    viewportWidth: number,
+    viewportHeight: number,
+    tileSize: number,
+    time: number,
+  ): void {
     if (this.isWinTransitionActive(snapshot.winTransition)) {
       this.lastStateRef = snapshot.gameState;
       return;
     }
 
-    const profile = resolveCameraRumble(snapshot.screen, this.lastStateRef, snapshot.gameState);
-    if (profile) {
-      const nowMs = Date.now();
-      const minIntervalMs = profile.minIntervalMs ?? 0;
-      if (minIntervalMs === 0 || nowMs - this.lastRumbleAtMs >= minIntervalMs) {
-        this.cameras.main.shake(profile.durationMs, profile.intensity, false);
-        this.lastRumbleAtMs = nowMs;
-      }
+    const camera = this.cameras.main;
+    const swayEnabled = snapshot.settings.cameraSwayEnabled && snapshot.screen === 'playing';
+    const impulse = swayEnabled ? resolveCameraSwayImpulse(snapshot.screen, this.lastStateRef, snapshot.gameState) : null;
+    if (impulse) {
+      const impulseScale = Math.max(2.5, tileSize * 0.12);
+      this.cameraSwayVelocityX += impulse.x * impulseScale;
+      this.cameraSwayVelocityY += impulse.y * impulseScale;
     }
 
+    this.cameraSwayOffsetX += this.cameraSwayVelocityX;
+    this.cameraSwayOffsetY += this.cameraSwayVelocityY;
+
+    const damping = swayEnabled ? 0.78 : 0.55;
+    const settle = swayEnabled ? 0.87 : 0.72;
+    this.cameraSwayVelocityX *= damping;
+    this.cameraSwayVelocityY *= damping;
+    this.cameraSwayOffsetX *= settle;
+    this.cameraSwayOffsetY *= settle;
+
+    const maxOffset = Math.max(5, tileSize * 0.2);
+    const offsetX = Phaser.Math.Clamp(this.cameraSwayOffsetX, -maxOffset, maxOffset);
+    const offsetY = Phaser.Math.Clamp(this.cameraSwayOffsetY, -maxOffset, maxOffset);
+
+    const driftAmplitude = swayEnabled ? Math.max(0.8, tileSize * 0.02) : 0;
+    const driftX = Math.sin(time / 900) * driftAmplitude;
+    const driftY = Math.cos(time / 1200) * driftAmplitude * 0.75;
+
+    camera.centerOn(viewportWidth * 0.5 + offsetX + driftX, viewportHeight * 0.5 + offsetY + driftY);
     this.lastStateRef = snapshot.gameState;
+  }
+
+  private updateFpsLabel(snapshot: ControllerSnapshot, viewportWidth: number, time: number): void {
+    this.fpsText.setPosition(viewportWidth - 12, 10);
+    if (!snapshot.settings.showFps) {
+      this.fpsText.setVisible(false);
+      return;
+    }
+
+    if (time - this.lastFpsSampleAtMs >= 220) {
+      const fps = Math.round(this.game.loop.actualFps);
+      this.fpsText.setText(`FPS ${fps}`);
+      this.lastFpsSampleAtMs = time;
+    }
+
+    this.fpsText.setVisible(true);
   }
 }
 

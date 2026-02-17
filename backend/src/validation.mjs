@@ -1,5 +1,13 @@
+import { Filter } from 'bad-words';
+
 const LEVEL_ID_RE = /^[a-z0-9_-]{3,64}$/;
 const TILE_RE = /^[# !xP1-9]$/;
+const PROFANITY_FILTER = new Filter();
+const LEGACY_HARD_R = String.fromCharCode(110, 105, 103, 103, 101, 114);
+const FORCED_NAME_REPLACEMENTS = new Map([
+  [LEGACY_HARD_R, 'Issac'],
+  ['gay', 'Issac'],
+]);
 
 function sanitizeName(raw) {
   if (typeof raw !== 'string') {
@@ -13,6 +21,15 @@ export function validatePlayerName(input) {
   const value = sanitizeName(input);
   if (value.length < 2) {
     throw new Error('Player name must be at least 2 characters.');
+  }
+
+  const normalized = value.toLowerCase();
+  if (FORCED_NAME_REPLACEMENTS.has(normalized)) {
+    return FORCED_NAME_REPLACEMENTS.get(normalized);
+  }
+
+  if (PROFANITY_FILTER.isProfane(normalized)) {
+    throw new Error('Player name contains blocked language.');
   }
 
   return value;
@@ -105,6 +122,11 @@ export function validateScorePayload(input) {
 
   if (!Number.isInteger(durationMs) || durationMs < 0 || durationMs > 86400000) {
     throw new Error('Duration must be between 0 and 86400000 ms.');
+  }
+
+  const minimumDurationMs = Math.max(150, moves * 18);
+  if (durationMs < minimumDurationMs) {
+    throw new Error('Duration is too low for the submitted move count.');
   }
 
   return {

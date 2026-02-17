@@ -1,6 +1,15 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { validatePlayerName } from './validation.mjs';
+
+function normalizeStoredPlayerName(raw) {
+  try {
+    return validatePlayerName(raw);
+  } catch {
+    return 'Player';
+  }
+}
 
 export function createDatabase(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
@@ -31,6 +40,42 @@ export function createDatabase(dbPath) {
     CREATE INDEX IF NOT EXISTS idx_level_scores_rank
       ON level_scores(level_id, moves ASC, duration_ms ASC, created_at ASC);
   `);
+
+  const distinctScoreNamesStmt = db.prepare(`
+    SELECT DISTINCT player_name AS playerName
+    FROM level_scores;
+  `);
+
+  const distinctAuthorNamesStmt = db.prepare(`
+    SELECT DISTINCT author_name AS authorName
+    FROM user_levels;
+  `);
+
+  const updateScoreNameStmt = db.prepare(`
+    UPDATE level_scores
+    SET player_name = ?
+    WHERE player_name = ?;
+  `);
+
+  const updateAuthorNameStmt = db.prepare(`
+    UPDATE user_levels
+    SET author_name = ?
+    WHERE author_name = ?;
+  `);
+
+  for (const row of distinctScoreNamesStmt.all()) {
+    const next = normalizeStoredPlayerName(row.playerName);
+    if (next !== row.playerName) {
+      updateScoreNameStmt.run(next, row.playerName);
+    }
+  }
+
+  for (const row of distinctAuthorNamesStmt.all()) {
+    const next = normalizeStoredPlayerName(row.authorName);
+    if (next !== row.authorName) {
+      updateAuthorNameStmt.run(next, row.authorName);
+    }
+  }
 
   const listLevelsStmt = db.prepare(`
     SELECT id, name, text, author_name AS authorName, created_at AS createdAt, updated_at AS updatedAt

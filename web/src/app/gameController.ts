@@ -174,14 +174,21 @@ export class GameController {
     this.emit();
   }
 
-  public openLevelSelect(): void {
+  public openLevelSelect(): boolean {
     if (this.screen !== 'paused' && this.screen !== 'intro') {
-      return;
+      return false;
+    }
+
+    if (!this.playerName) {
+      this.statusMessage = 'Enter a player name before opening level select.';
+      this.emit();
+      return false;
     }
 
     this.levelSelectReturnScreen = this.screen;
     this.screen = 'level-select';
     this.emit();
+    return true;
   }
 
   public closeLevelSelect(): void {
@@ -442,6 +449,33 @@ export class GameController {
     this.settings = {
       ...this.settings,
       lightingEnabled: enabled,
+    };
+    saveSettings(this.settings);
+    this.emit();
+  }
+
+  public setCameraSwayEnabled(enabled: boolean): void {
+    this.settings = {
+      ...this.settings,
+      cameraSwayEnabled: enabled,
+    };
+    saveSettings(this.settings);
+    this.emit();
+  }
+
+  public setShowFps(enabled: boolean): void {
+    this.settings = {
+      ...this.settings,
+      showFps: enabled,
+    };
+    saveSettings(this.settings);
+    this.emit();
+  }
+
+  public setMobileFlipHorizontal(enabled: boolean): void {
+    this.settings = {
+      ...this.settings,
+      mobileFlipHorizontal: enabled,
     };
     saveSettings(this.settings);
     this.emit();

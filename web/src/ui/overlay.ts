@@ -98,6 +98,13 @@ function isIntroStartKey(event: KeyboardEvent): boolean {
   return event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar';
 }
 
+function isLikelyMobileDevice(): boolean {
+  const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const userAgent = navigator.userAgent.toLowerCase();
+  const hasMobileUserAgent = /android|iphone|ipad|ipod|mobile/.test(userAgent);
+  return hasCoarsePointer || hasMobileUserAgent;
+}
+
 export class OverlayUI {
   private readonly root: HTMLElement;
 
@@ -117,6 +124,8 @@ export class OverlayUI {
 
   private readonly levelStartButton: HTMLButtonElement;
 
+  private readonly pauseLevelSelectButton: HTMLButtonElement;
+
   private readonly mainCurrentLevelText: HTMLElement;
 
   private readonly musicVolumeSlider: HTMLInputElement;
@@ -125,11 +134,19 @@ export class OverlayUI {
 
   private readonly lightingToggle: HTMLInputElement;
 
+  private readonly cameraSwayToggle: HTMLInputElement;
+
+  private readonly showFpsToggle: HTMLInputElement;
+
+  private readonly mobileFlipToggle: HTMLInputElement;
+
   private readonly panels: Record<string, HTMLElement>;
 
   private readonly introPanel: HTMLElement;
 
   private readonly introStartButton: HTMLButtonElement;
+
+  private readonly introLevelSelectButton: HTMLButtonElement;
 
   private readonly introPlayerNameInput: HTMLInputElement;
 
@@ -146,6 +163,12 @@ export class OverlayUI {
   private readonly introSfxVolumeSlider: HTMLInputElement;
 
   private readonly introLightingToggle: HTMLInputElement;
+
+  private readonly introCameraSwayToggle: HTMLInputElement;
+
+  private readonly introShowFpsToggle: HTMLInputElement;
+
+  private readonly introMobileFlipToggle: HTMLInputElement;
 
   private readonly introCinematic: LockstepIntroCinematic;
 
@@ -184,6 +207,10 @@ export class OverlayUI {
   private readonly editorDeleteButton: HTMLButtonElement;
 
   private readonly pauseTestBackButton: HTMLButtonElement;
+
+  private readonly mobileOnlySettings: HTMLElement[];
+
+  private readonly isMobileDevice: boolean;
 
   private editorPaletteButtons = new Map<string, HTMLButtonElement>();
 
@@ -228,6 +255,7 @@ export class OverlayUI {
 
     this.introPanel = asElement<HTMLElement>(this.root, '[data-panel="intro"]');
     this.introStartButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-start');
+    this.introLevelSelectButton = asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select');
     this.introPlayerNameInput = asElement<HTMLInputElement>(this.root, '#intro-player-name-input');
     this.introCurrentLevelText = asElement<HTMLElement>(this.root, '#intro-current-level');
     this.introSettingsPanel = asElement<HTMLElement>(this.root, '#intro-settings-panel');
@@ -236,6 +264,9 @@ export class OverlayUI {
     this.introMusicVolumeSlider = asElement<HTMLInputElement>(this.root, '#intro-settings-music-volume');
     this.introSfxVolumeSlider = asElement<HTMLInputElement>(this.root, '#intro-settings-sfx-volume');
     this.introLightingToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-lighting');
+    this.introCameraSwayToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-camera-sway');
+    this.introShowFpsToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-show-fps');
+    this.introMobileFlipToggle = asElement<HTMLInputElement>(this.root, '#intro-settings-mobile-flip');
     this.introCinematic = new LockstepIntroCinematic({
       elements: {
         panel: this.introPanel,
@@ -257,9 +288,13 @@ export class OverlayUI {
     this.mainCurrentLevelText = asElement<HTMLElement>(this.root, '#main-current-level');
     this.playButton = asElement<HTMLButtonElement>(this.root, '#btn-play');
     this.levelStartButton = asElement<HTMLButtonElement>(this.root, '#btn-level-start');
+    this.pauseLevelSelectButton = asElement<HTMLButtonElement>(this.root, '#btn-pause-level-select');
     this.musicVolumeSlider = asElement<HTMLInputElement>(this.root, '#settings-music-volume');
     this.sfxVolumeSlider = asElement<HTMLInputElement>(this.root, '#settings-sfx-volume');
     this.lightingToggle = asElement<HTMLInputElement>(this.root, '#settings-lighting');
+    this.cameraSwayToggle = asElement<HTMLInputElement>(this.root, '#settings-camera-sway');
+    this.showFpsToggle = asElement<HTMLInputElement>(this.root, '#settings-show-fps');
+    this.mobileFlipToggle = asElement<HTMLInputElement>(this.root, '#settings-mobile-flip');
     this.scoreList = asElement<HTMLOListElement>(this.root, '#score-list');
     this.scoreStatus = asElement<HTMLElement>(this.root, '#score-status');
     this.hudScoreboard = asElement<HTMLElement>(this.root, '#hud-scoreboard');
@@ -279,6 +314,13 @@ export class OverlayUI {
     this.editorSavePlayButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save-play');
     this.editorDeleteButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-delete');
     this.pauseTestBackButton = asElement<HTMLButtonElement>(this.root, '#btn-test-back-editor');
+    this.mobileOnlySettings = Array.from(this.root.querySelectorAll<HTMLElement>('[data-mobile-only]'));
+    this.isMobileDevice = isLikelyMobileDevice();
+    if (!this.isMobileDevice) {
+      for (const setting of this.mobileOnlySettings) {
+        setting.hidden = true;
+      }
+    }
 
     this.buildPalette();
     this.renderEditorGrid();
@@ -301,6 +343,18 @@ export class OverlayUI {
             <label class="checkbox-row">
               <input id="intro-settings-lighting" type="checkbox" />
               Lighting effects
+            </label>
+            <label class="checkbox-row">
+              <input id="intro-settings-camera-sway" type="checkbox" />
+              Camera sway
+            </label>
+            <label class="checkbox-row">
+              <input id="intro-settings-show-fps" type="checkbox" />
+              Show FPS
+            </label>
+            <label class="checkbox-row" data-mobile-only>
+              <input id="intro-settings-mobile-flip" type="checkbox" />
+              Flip screen horizontally
             </label>
             <button type="button" id="btn-intro-open-editor">Level Editor</button>
             <button type="button" id="btn-intro-settings-close">Done</button>
@@ -389,6 +443,18 @@ export class OverlayUI {
         <label class="checkbox-row">
           <input id="settings-lighting" type="checkbox" />
           Lighting effects
+        </label>
+        <label class="checkbox-row">
+          <input id="settings-camera-sway" type="checkbox" />
+          Camera sway
+        </label>
+        <label class="checkbox-row">
+          <input id="settings-show-fps" type="checkbox" />
+          Show FPS
+        </label>
+        <label class="checkbox-row" data-mobile-only>
+          <input id="settings-mobile-flip" type="checkbox" />
+          Flip screen horizontally
         </label>
 
         <div class="button-row">
@@ -495,8 +561,10 @@ export class OverlayUI {
 
     asElement<HTMLButtonElement>(this.root, '#btn-intro-level-select').addEventListener('click', () => {
       this.closeIntroSettings();
-      this.controller.openLevelSelect();
-      void this.loadScoresForSelectedLevel(true);
+      const opened = this.controller.openLevelSelect();
+      if (opened) {
+        void this.loadScoresForSelectedLevel(true);
+      }
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-intro-level-editor').addEventListener('click', () => {
@@ -575,8 +643,10 @@ export class OverlayUI {
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-pause-level-select').addEventListener('click', () => {
-      this.controller.openLevelSelect();
-      void this.loadScoresForSelectedLevel(true);
+      const opened = this.controller.openLevelSelect();
+      if (opened) {
+        void this.loadScoresForSelectedLevel(true);
+      }
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-pause-settings').addEventListener('click', () => {
@@ -659,6 +729,30 @@ export class OverlayUI {
 
     this.introLightingToggle.addEventListener('change', () => {
       this.controller.setLightingEnabled(this.introLightingToggle.checked);
+    });
+
+    this.cameraSwayToggle.addEventListener('change', () => {
+      this.controller.setCameraSwayEnabled(this.cameraSwayToggle.checked);
+    });
+
+    this.introCameraSwayToggle.addEventListener('change', () => {
+      this.controller.setCameraSwayEnabled(this.introCameraSwayToggle.checked);
+    });
+
+    this.showFpsToggle.addEventListener('change', () => {
+      this.controller.setShowFps(this.showFpsToggle.checked);
+    });
+
+    this.introShowFpsToggle.addEventListener('change', () => {
+      this.controller.setShowFps(this.introShowFpsToggle.checked);
+    });
+
+    this.mobileFlipToggle.addEventListener('change', () => {
+      this.controller.setMobileFlipHorizontal(this.mobileFlipToggle.checked);
+    });
+
+    this.introMobileFlipToggle.addEventListener('change', () => {
+      this.controller.setMobileFlipHorizontal(this.introMobileFlipToggle.checked);
     });
 
     this.editorGridRoot.addEventListener('pointerdown', (event) => {
@@ -800,6 +894,12 @@ export class OverlayUI {
     this.introSfxVolumeSlider.value = snapshot.settings.sfxVolume.toString();
     this.lightingToggle.checked = snapshot.settings.lightingEnabled;
     this.introLightingToggle.checked = snapshot.settings.lightingEnabled;
+    this.cameraSwayToggle.checked = snapshot.settings.cameraSwayEnabled;
+    this.introCameraSwayToggle.checked = snapshot.settings.cameraSwayEnabled;
+    this.showFpsToggle.checked = snapshot.settings.showFps;
+    this.introShowFpsToggle.checked = snapshot.settings.showFps;
+    this.mobileFlipToggle.checked = snapshot.settings.mobileFlipHorizontal;
+    this.introMobileFlipToggle.checked = snapshot.settings.mobileFlipHorizontal;
     this.statusText.textContent = snapshot.statusMessage ?? '';
     const currentLevel = snapshot.levels[snapshot.selectedLevelIndex];
     if (currentLevel) {
@@ -813,6 +913,8 @@ export class OverlayUI {
     this.playButton.disabled = !canPlay;
     this.levelStartButton.disabled = !canPlay;
     this.introStartButton.disabled = !canPlay;
+    this.introLevelSelectButton.disabled = !canPlay;
+    this.pauseLevelSelectButton.disabled = !canPlay;
     this.editorSaveButton.disabled = !canPlay;
     this.editorSavePlayButton.disabled = !canPlay;
     this.editorDeleteButton.disabled = false;
@@ -891,6 +993,10 @@ export class OverlayUI {
     if (gameShell) {
       gameShell.classList.toggle('editor-screen-active', snapshot.screen === 'editor');
       gameShell.classList.toggle('level-select-screen-active', snapshot.screen === 'level-select');
+      gameShell.classList.toggle(
+        'mobile-flip-horizontal',
+        this.isMobileDevice && snapshot.settings.mobileFlipHorizontal,
+      );
     }
     this.lastRenderedScreen = snapshot.screen;
   }
@@ -1180,7 +1286,9 @@ export class OverlayUI {
     }
 
     this.editorGrid[y][x] = this.editorTile;
-    this.renderEditorGrid();
+    target.className = `editor-grid-cell ${tileClass(this.editorTile)}`;
+    target.textContent = this.editorTile === ' ' ? '' : this.editorTile;
+    target.title = `${describeTile(this.editorTile)} @ (${x + 1}, ${y + 1})`;
   }
 
   private loadLevelIntoEditor(level: ParsedLevel): void {

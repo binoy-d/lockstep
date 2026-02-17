@@ -2,6 +2,9 @@ export interface GameSettings {
   musicVolume: number;
   sfxVolume: number;
   lightingEnabled: boolean;
+  cameraSwayEnabled: boolean;
+  showFps: boolean;
+  mobileFlipHorizontal: boolean;
 }
 
 const STORAGE_KEY = 'puzzle-game-settings-v1';
@@ -10,6 +13,9 @@ const DEFAULT_SETTINGS: GameSettings = {
   musicVolume: 0.6,
   sfxVolume: 0.85,
   lightingEnabled: true,
+  cameraSwayEnabled: true,
+  showFps: false,
+  mobileFlipHorizontal: false,
 };
 
 function clamp(value: number, min: number, max: number): number {
@@ -44,6 +50,18 @@ export function loadSettings(): GameSettings {
         typeof parsed.lightingEnabled === 'boolean'
           ? parsed.lightingEnabled
           : DEFAULT_SETTINGS.lightingEnabled,
+      cameraSwayEnabled:
+        typeof parsed.cameraSwayEnabled === 'boolean'
+          ? parsed.cameraSwayEnabled
+          : DEFAULT_SETTINGS.cameraSwayEnabled,
+      showFps:
+        typeof parsed.showFps === 'boolean'
+          ? parsed.showFps
+          : DEFAULT_SETTINGS.showFps,
+      mobileFlipHorizontal:
+        typeof parsed.mobileFlipHorizontal === 'boolean'
+          ? parsed.mobileFlipHorizontal
+          : DEFAULT_SETTINGS.mobileFlipHorizontal,
     };
   } catch {
     return { ...DEFAULT_SETTINGS };

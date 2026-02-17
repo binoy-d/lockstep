@@ -13,6 +13,16 @@ test('validates and normalizes level id and player name', () => {
   assert.equal(validatePlayerName('  Ava   Lane  '), 'Ava Lane');
 });
 
+test('forces specific legacy abusive names to Issac', () => {
+  const hardR = String.fromCharCode(110, 105, 103, 103, 101, 114);
+  assert.equal(validatePlayerName(hardR), 'Issac');
+  assert.equal(validatePlayerName('GAY'), 'Issac');
+});
+
+test('rejects profane player names', () => {
+  assert.throws(() => validatePlayerName('shithead'), /blocked language/i);
+});
+
 test('rejects invalid level payloads', () => {
   assert.throws(
     () =>
@@ -57,6 +67,17 @@ test('validates score payload constraints', () => {
         durationMs: 10,
       }),
     /player name|moves/i,
+  );
+
+  assert.throws(
+    () =>
+      validateScorePayload({
+        levelId: 'map1',
+        playerName: 'Binoy',
+        moves: 10,
+        durationMs: 20,
+      }),
+    /duration is too low/i,
   );
 });
 

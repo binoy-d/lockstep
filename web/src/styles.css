@@ -94,6 +94,11 @@ body::after {
   height: 100%;
 }
 
+#game-shell.mobile-flip-horizontal #game-root canvas {
+  transform: scaleX(-1);
+  transform-origin: center;
+}
+
 #menu-root {
   position: absolute;
   inset: 0;

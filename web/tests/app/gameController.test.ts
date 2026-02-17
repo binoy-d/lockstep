@@ -2,17 +2,24 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseLevelText } from '../../src/core/levelParser';
 import { GameController } from '../../src/app/gameController';
 
+function makeSettings() {
+  return {
+    musicVolume: 0.5,
+    sfxVolume: 0.85,
+    lightingEnabled: true,
+    cameraSwayEnabled: true,
+    showFps: false,
+    mobileFlipHorizontal: false,
+  };
+}
+
 function makeController() {
   const levels = [
     parseLevelText('map0', ['#####', '#P!##', '#####'].join('\n')),
     parseLevelText('map1', ['#####', '#P ##', '#####'].join('\n')),
   ];
 
-  const controller = new GameController(levels, {
-    musicVolume: 0.5,
-    sfxVolume: 0.85,
-    lightingEnabled: true,
-  });
+  const controller = new GameController(levels, makeSettings());
 
   controller.finishIntro();
   return controller;
@@ -22,9 +29,8 @@ describe('game controller', () => {
   it('starts on intro screen and transitions to main when intro completes', () => {
     const levels = [parseLevelText('map0', ['#####', '#P!##', '#####'].join('\n'))];
     const controller = new GameController(levels, {
+      ...makeSettings(),
       musicVolume: 0.4,
-      sfxVolume: 0.85,
-      lightingEnabled: true,
     });
 
     expect(controller.getSnapshot().screen).toBe('intro');
@@ -101,11 +107,7 @@ describe('game controller', () => {
         parseLevelText('map0', ['#####', '#P!##', '#####'].join('\n')),
         parseLevelText('map1', ['#####', '#P ##', '#####'].join('\n')),
       ];
-      const controller = new GameController(levels, {
-        musicVolume: 0.5,
-        sfxVolume: 0.85,
-        lightingEnabled: true,
-      });
+      const controller = new GameController(levels, makeSettings());
 
       controller.finishIntro();
       controller.setPlayerName('Ava');
@@ -133,18 +135,19 @@ describe('game controller', () => {
     }
   });
 
-  it('allows level select from intro and pause screens', () => {
+  it('requires player name before opening level select, then allows from intro and pause', () => {
     const levels = [
       parseLevelText('map0', ['#####', '#P!##', '#####'].join('\n')),
       parseLevelText('map1', ['#####', '#P ##', '#####'].join('\n')),
     ];
-    const introController = new GameController(levels, {
-      musicVolume: 0.5,
-      sfxVolume: 0.85,
-      lightingEnabled: true,
-    });
+    const introController = new GameController(levels, makeSettings());
 
     expect(introController.getSnapshot().screen).toBe('intro');
+    introController.openLevelSelect();
+    expect(introController.getSnapshot().screen).toBe('intro');
+    expect(introController.getSnapshot().statusMessage).toMatch(/player name/i);
+
+    introController.setPlayerName('Ava');
     introController.openLevelSelect();
     expect(introController.getSnapshot().screen).toBe('level-select');
     introController.closeLevelSelect();
@@ -170,11 +173,7 @@ describe('game controller', () => {
 
     try {
       const enemyLevel = parseLevelText('enemy', ['######', '#P12 #', '######'].join('\n'));
-      const controller = new GameController([enemyLevel], {
-        musicVolume: 0.5,
-        sfxVolume: 0.85,
-        lightingEnabled: true,
-      });
+      const controller = new GameController([enemyLevel], makeSettings());
 
       controller.finishIntro();
       controller.setPlayerName('Ava');
@@ -220,11 +219,7 @@ describe('game controller', () => {
 
     try {
       const lavaLevel = parseLevelText('lava', ['#####', '#Px #', '#####'].join('\n'));
-      const controller = new GameController([lavaLevel], {
-        musicVolume: 0.5,
-        sfxVolume: 0.85,
-        lightingEnabled: true,
-      });
+      const controller = new GameController([lavaLevel], makeSettings());
 
       controller.finishIntro();
       controller.setPlayerName('Ava');
