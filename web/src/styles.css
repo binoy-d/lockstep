@@ -805,6 +805,24 @@ button:disabled {
   background: rgba(46, 14, 20, 0.9);
 }
 
+.level-card-edit {
+  min-width: auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-color: rgba(122, 232, 185, 0.62);
+  color: #d7fff2;
+  background: rgba(9, 34, 27, 0.9);
+}
+
+.level-card-edit:hover,
+.level-card-edit:focus-visible {
+  border-color: rgba(122, 232, 185, 0.85);
+  background: rgba(12, 52, 39, 0.92);
+}
+
 .level-card-delete:hover,
 .level-card-delete:focus-visible {
   border-color: rgba(255, 132, 150, 0.9);
@@ -1309,6 +1327,10 @@ button:disabled {
   }
 
   .level-card-delete {
+    width: auto;
+  }
+
+  .level-card-edit {
     width: auto;
   }
 

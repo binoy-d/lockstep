@@ -24,12 +24,23 @@ async function bootstrap(): Promise<void> {
 
   const builtInLevels = await loadLevelsFromManifest('/assets/levels/manifest.json');
   const customLevels: ParsedLevel[] = [];
+  const customLevelOwners = new Map<
+    string,
+    {
+      ownerUserId: number | null;
+      ownerUsername: string | null;
+    }
+  >();
 
   try {
     const fromBackend = await fetchCustomLevels();
     for (const level of fromBackend) {
       try {
         customLevels.push(parseLevelText(level.id, level.text));
+        customLevelOwners.set(level.id, {
+          ownerUserId: level.ownerUserId,
+          ownerUsername: level.ownerUsername,
+        });
       } catch {
         // Skip malformed backend entries but continue loading valid levels.
       }
@@ -59,6 +70,7 @@ async function bootstrap(): Promise<void> {
 
   new OverlayUI(menuRoot, controller, {
     builtInLevelCount: builtInLevels.length,
+    customLevelOwners,
   });
 }
 

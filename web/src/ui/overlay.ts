@@ -128,6 +128,13 @@ function formatError(error: unknown): string {
 
 interface OverlayUiOptions {
   builtInLevelCount?: number;
+  customLevelOwners?: Map<
+    string,
+    {
+      ownerUserId: number | null;
+      ownerUsername: string | null;
+    }
+  >;
 }
 
 export class OverlayUI {
@@ -136,6 +143,14 @@ export class OverlayUI {
   private readonly controller: GameController;
 
   private readonly builtInLevelCount: number;
+
+  private readonly customLevelOwners = new Map<
+    string,
+    {
+      ownerUserId: number | null;
+      ownerUsername: string | null;
+    }
+  >();
 
   private readonly levelSelect: HTMLSelectElement;
 
@@ -300,6 +315,14 @@ export class OverlayUI {
     this.controller = controller;
     const totalLevels = controller.getSnapshot().levels.length;
     this.builtInLevelCount = Math.max(0, Math.min(options.builtInLevelCount ?? 0, totalLevels));
+    if (options.customLevelOwners) {
+      for (const [levelId, owner] of options.customLevelOwners) {
+        this.customLevelOwners.set(levelId, {
+          ownerUserId: owner.ownerUserId,
+          ownerUsername: owner.ownerUsername,
+        });
+      }
+    }
 
     this.root.innerHTML = this.buildMarkup();
 
@@ -1333,8 +1356,20 @@ export class OverlayUI {
 
   private syncLevelOptions(snapshot: ControllerSnapshot): void {
     const levelIdsSignature = snapshot.levels.map((level) => level.id).join('|');
-    const adminSignature = this.authState.user?.isAdmin ? 'admin' : 'default';
-    const signature = `${levelIdsSignature}::${adminSignature}`;
+    const authSignature = this.authState.user
+      ? `${this.authState.user.id}:${this.authState.user.isAdmin ? 'admin' : 'user'}`
+      : 'anonymous';
+    const ownershipSignature = snapshot.levels
+      .map((level, index) => {
+        if (index < this.builtInLevelCount) {
+          return 'builtin';
+        }
+
+        const owner = this.customLevelOwners.get(level.id);
+        return `${owner?.ownerUserId ?? 'none'}:${owner?.ownerUsername ?? ''}`;
+      })
+      .join('|');
+    const signature = `${levelIdsSignature}::${authSignature}::${ownershipSignature}`;
     if (this.levelSelect.dataset.signature !== signature) {
       this.levelSelect.innerHTML = '';
       this.levelSelectGrid.innerHTML = '';
@@ -1397,6 +1432,21 @@ export class OverlayUI {
 
     const isBuiltInLevel = index < this.builtInLevelCount;
     const isAdmin = Boolean(this.authState.user?.isAdmin);
+    const canDirectEdit = this.canDirectEditLevel(level.id, index);
+    if (canDirectEdit) {
+      const editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'level-card-edit';
+      editButton.textContent = 'Edit';
+      editButton.title = `Edit ${level.id}`;
+      editButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.openEditorForExistingLevel(level);
+      });
+      actions.append(editButton);
+    }
+
     if (!isBuiltInLevel && isAdmin) {
       const deleteButton = document.createElement('button');
       deleteButton.type = 'button';
@@ -1452,6 +1502,46 @@ export class OverlayUI {
     return { container: card, selectButton };
   }
 
+  private canDirectEditLevel(levelId: string, levelIndex: number): boolean {
+    if (levelIndex < this.builtInLevelCount) {
+      return false;
+    }
+
+    const user = this.authState.user;
+    if (!this.authState.authenticated || !user) {
+      return false;
+    }
+
+    if (user.isAdmin) {
+      return true;
+    }
+
+    const owner = this.customLevelOwners.get(levelId);
+    if (!owner) {
+      return false;
+    }
+
+    if (owner.ownerUserId !== null) {
+      return owner.ownerUserId === user.id;
+    }
+
+    if (owner.ownerUsername) {
+      return owner.ownerUsername === user.username;
+    }
+
+    return false;
+  }
+
+  private openEditorForExistingLevel(level: ParsedLevel): void {
+    this.editorGrid = cloneGrid(level.grid);
+    this.editorTestingPublishLevelId = null;
+    this.editorLoadedLevelId = level.id;
+    this.editorIdInput.value = level.id;
+    this.renderEditorGrid();
+    this.showEditorFeedback(`Editing ${level.id}. Test + Play, then publish when ready.`);
+    this.controller.openEditor();
+  }
+
   private async deleteLevelFromLevelSelect(levelId: string): Promise<void> {
     if (!this.authState.authenticated || !this.authState.user?.isAdmin) {
       this.statusText.textContent = 'Admin sign-in required to delete levels.';
@@ -1466,6 +1556,7 @@ export class OverlayUI {
     try {
       await deleteCustomLevel({ levelId });
       this.scoreCache.delete(levelId);
+      this.customLevelOwners.delete(levelId);
       const removed = this.controller.removeLevel(levelId);
       if (!removed) {
         this.statusText.textContent = `Level ${levelId} was not found in local state.`;
@@ -1876,6 +1967,10 @@ export class OverlayUI {
       this.controller.upsertLevel(parsed);
       this.editorLoadedLevelId = saved.id;
       this.editorIdInput.value = saved.id;
+      this.customLevelOwners.set(saved.id, {
+        ownerUserId: saved.ownerUserId,
+        ownerUsername: saved.ownerUsername,
+      });
       this.scoreCache.delete(saved.id);
 
       if (validation.warnings.length > 0) {
@@ -1910,6 +2005,7 @@ export class OverlayUI {
     try {
       await deleteCustomLevel({ levelId });
       this.scoreCache.delete(levelId);
+      this.customLevelOwners.delete(levelId);
       this.controller.removeLevel(levelId);
       this.editorLoadedLevelId = null;
       this.editorIdInput.value = this.defaultEditorId();
