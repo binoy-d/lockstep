@@ -102,7 +102,8 @@ function isLikelyMobileDevice(): boolean {
   const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
   const userAgent = navigator.userAgent.toLowerCase();
   const hasMobileUserAgent = /android|iphone|ipad|ipod|mobile/.test(userAgent);
-  return hasCoarsePointer || hasMobileUserAgent;
+  const hasTouch = navigator.maxTouchPoints > 0;
+  return hasCoarsePointer || hasMobileUserAgent || hasTouch;
 }
 
 export class OverlayUI {
@@ -207,6 +208,10 @@ export class OverlayUI {
   private readonly editorDeleteButton: HTMLButtonElement;
 
   private readonly pauseTestBackButton: HTMLButtonElement;
+
+  private readonly mobileSwipeHint: HTMLElement;
+
+  private readonly mobileFlipFab: HTMLButtonElement;
 
   private readonly mobileOnlySettings: HTMLElement[];
 
@@ -314,6 +319,8 @@ export class OverlayUI {
     this.editorSavePlayButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save-play');
     this.editorDeleteButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-delete');
     this.pauseTestBackButton = asElement<HTMLButtonElement>(this.root, '#btn-test-back-editor');
+    this.mobileSwipeHint = asElement<HTMLElement>(this.root, '#mobile-swipe-hint');
+    this.mobileFlipFab = asElement<HTMLButtonElement>(this.root, '#btn-mobile-flip-fab');
     this.mobileOnlySettings = Array.from(this.root.querySelectorAll<HTMLElement>('[data-mobile-only]'));
     this.isMobileDevice = isLikelyMobileDevice();
     if (!this.isMobileDevice) {
@@ -375,6 +382,7 @@ export class OverlayUI {
               <strong id="intro-current-level">Level 1</strong>
             </div>
             <p class="intro-level-hint">Press <kbd>ESC</kbd> in-game to open Level Select.</p>
+            <p class="intro-level-hint" data-mobile-only>Mobile: swipe anywhere to move. Use Flip in settings.</p>
           </div>
           <div class="button-row intro-button-row">
             <button type="button" id="btn-intro-start">Start</button>
@@ -385,6 +393,12 @@ export class OverlayUI {
       </section>
 
       <div class="menu-status" id="menu-status" aria-live="polite"></div>
+      <div class="mobile-swipe-hint" id="mobile-swipe-hint" data-mobile-only hidden>
+        Swipe anywhere to move. Use Flip if left/right feels reversed.
+      </div>
+      <button type="button" class="mobile-flip-fab" id="btn-mobile-flip-fab" data-mobile-only hidden>
+        Flip: Off
+      </button>
       <aside class="hud-scoreboard" id="hud-scoreboard" hidden>
         <h3>High Scores</h3>
         <div id="hud-score-status" class="score-status">Lower is better (moves, then time)</div>
@@ -755,6 +769,11 @@ export class OverlayUI {
       this.controller.setMobileFlipHorizontal(this.introMobileFlipToggle.checked);
     });
 
+    this.mobileFlipFab.addEventListener('click', () => {
+      const current = this.controller.getSnapshot().settings.mobileFlipHorizontal;
+      this.controller.setMobileFlipHorizontal(!current);
+    });
+
     this.editorGridRoot.addEventListener('pointerdown', (event) => {
       const target = event.target as HTMLElement;
       if ((event.buttons & 1) !== 1 || !target.dataset.x || !target.dataset.y) {
@@ -919,6 +938,14 @@ export class OverlayUI {
     this.editorSavePlayButton.disabled = !canPlay;
     this.editorDeleteButton.disabled = false;
     this.pauseTestBackButton.hidden = !this.editorTestingPublishLevelId;
+    const showMobileGameUi =
+      this.isMobileDevice &&
+      canPlay &&
+      (snapshot.screen === 'playing' || snapshot.screen === 'paused' || snapshot.screen === 'level-select');
+    this.mobileFlipFab.hidden = !showMobileGameUi;
+    this.mobileFlipFab.textContent = snapshot.settings.mobileFlipHorizontal ? 'Flip: On' : 'Flip: Off';
+    const showSwipeHint = this.isMobileDevice && snapshot.screen === 'playing' && snapshot.gameState.moves === 0;
+    this.mobileSwipeHint.hidden = !showSwipeHint;
 
     this.panels.intro.hidden = snapshot.screen !== 'intro';
     this.panels.main.hidden = snapshot.screen !== 'main';

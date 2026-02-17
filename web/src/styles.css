@@ -8,6 +8,10 @@
   --accent: #57d0ff;
   --accent-2: #45ffaf;
   --danger: #ff5f6d;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 * {
@@ -380,12 +384,42 @@ kbd {
 
 .menu-status {
   position: absolute;
-  top: 16px;
+  top: calc(12px + var(--safe-top));
   left: 50%;
   transform: translateX(-50%);
   min-height: 20px;
   color: var(--accent-2);
   text-shadow: 0 0 12px rgba(69, 255, 175, 0.35);
+}
+
+.mobile-swipe-hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(16px + var(--safe-bottom));
+  width: min(460px, calc(100vw - 26px));
+  pointer-events: none;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(137, 217, 255, 0.35);
+  background: rgba(6, 16, 28, 0.86);
+  color: #d6e9ff;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-align: center;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34);
+}
+
+.mobile-flip-fab {
+  position: absolute;
+  right: calc(12px + var(--safe-right));
+  bottom: calc(56px + var(--safe-bottom));
+  min-width: 92px;
+  border-radius: 999px;
+  border-color: rgba(124, 215, 255, 0.75);
+  background: rgba(8, 20, 34, 0.92);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  z-index: 6;
 }
 
 [data-panel='main'] {
@@ -481,10 +515,10 @@ button:disabled {
 
 .hud-scoreboard {
   position: absolute;
-  right: 18px;
-  top: 72px;
+  right: calc(18px + var(--safe-right));
+  top: calc(72px + var(--safe-top));
   width: min(300px, 27vw);
-  max-height: calc(100vh - 96px);
+  max-height: calc(100vh - 96px - var(--safe-top) - var(--safe-bottom));
   overflow: auto;
   pointer-events: auto;
   padding: 12px;
@@ -959,8 +993,8 @@ button:disabled {
   }
 
   .intro-settings-corner {
-    right: 12px;
-    top: 12px;
+    right: calc(12px + var(--safe-right));
+    top: calc(12px + var(--safe-top));
   }
 
   .intro-menu-dock {
@@ -971,6 +1005,20 @@ button:disabled {
     bottom: 12px;
     padding: 12px;
     display: block;
+  }
+
+  .mobile-swipe-hint {
+    bottom: calc(12px + var(--safe-bottom));
+    font-size: 11px;
+    width: min(420px, calc(100vw - 20px));
+  }
+
+  .mobile-flip-fab {
+    right: calc(10px + var(--safe-right));
+    bottom: calc(48px + var(--safe-bottom));
+    min-width: 84px;
+    padding: 8px 10px;
+    font-size: 13px;
   }
 
   .menu-panel {

@@ -1,4 +1,5 @@
 import { Filter } from 'bad-words';
+import { createHash } from 'node:crypto';
 
 const LEVEL_ID_RE = /^[a-z0-9_-]{3,64}$/;
 const TILE_RE = /^[# !xP1-9]$/;
@@ -9,6 +10,7 @@ const FORCED_NAME_REPLACEMENTS = new Map([
   ['gay', 'Issac'],
 ]);
 const LEVEL_NAME_FALLBACK = 'Custom Level';
+const LEVEL_ID_FALLBACK_PREFIX = 'custom-level';
 
 function sanitizeName(raw, maxLength = 32) {
   if (typeof raw !== 'string') {
@@ -18,9 +20,29 @@ function sanitizeName(raw, maxLength = 32) {
   return raw.trim().replace(/\s+/g, ' ').slice(0, maxLength);
 }
 
+function sanitizeLevelId(raw) {
+  if (typeof raw !== 'string') {
+    return '';
+  }
+
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 64);
+}
+
 function containsBlockedLanguage(value) {
   const normalized = value.toLowerCase();
   return normalized.includes(LEGACY_HARD_R) || PROFANITY_FILTER.isProfane(normalized);
+}
+
+function levelIdFallback(raw) {
+  const source = typeof raw === 'string' ? raw : '';
+  const hash = createHash('sha256').update(source).digest('hex').slice(0, 10);
+  return `${LEVEL_ID_FALLBACK_PREFIX}-${hash}`;
 }
 
 export function validatePlayerName(input) {
@@ -49,6 +71,10 @@ export function validateLevelId(input) {
   const trimmed = input.trim().toLowerCase();
   if (!LEVEL_ID_RE.test(trimmed)) {
     throw new Error('Level id must use lowercase letters, numbers, underscore, or dash (3-64 chars).');
+  }
+
+  if (containsBlockedLanguage(trimmed)) {
+    throw new Error('Level id contains blocked language.');
   }
 
   return trimmed;
@@ -125,6 +151,15 @@ export function normalizeStoredLevelName(input) {
   }
 
   return value;
+}
+
+export function normalizeStoredLevelId(input) {
+  const sanitized = sanitizeLevelId(input);
+  if (LEVEL_ID_RE.test(sanitized) && !containsBlockedLanguage(sanitized)) {
+    return sanitized;
+  }
+
+  return levelIdFallback(typeof input === 'string' ? input : '');
 }
 
 export function validateScorePayload(input) {

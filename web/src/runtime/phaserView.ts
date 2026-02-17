@@ -45,7 +45,18 @@ function isLikelyMobileDevice(): boolean {
   const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
   const userAgent = navigator.userAgent.toLowerCase();
   const hasMobileUserAgent = /android|iphone|ipad|ipod|mobile/.test(userAgent);
-  return hasCoarsePointer || hasMobileUserAgent;
+  const hasTouch = navigator.maxTouchPoints > 0;
+  return hasCoarsePointer || hasMobileUserAgent || hasTouch;
+}
+
+function readCssPxVariable(name: string): number {
+  const rawValue = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const parsed = Number.parseFloat(rawValue);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.max(0, parsed);
 }
 
 class PuzzleScene extends Phaser.Scene {
@@ -92,6 +103,14 @@ class PuzzleScene extends Phaser.Scene {
   private readonly isMobileDevice = isLikelyMobileDevice();
 
   private swipeStart: { x: number; y: number; pointerId: number; startedAtMs: number } | null = null;
+
+  private safeInsetTop = 0;
+
+  private safeInsetRight = 0;
+
+  private safeInsetBottom = 0;
+
+  private safeInsetLeft = 0;
 
   private cachedEnemyTargetsStateRef: GameState | null = null;
 
@@ -151,6 +170,11 @@ class PuzzleScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setAlpha(0.72)
       .setVisible(false);
+
+    this.refreshSafeInsets();
+    this.scale.on(Phaser.Scale.Events.RESIZE, () => {
+      this.refreshSafeInsets();
+    });
 
     this.registerInput();
   }
@@ -258,6 +282,39 @@ class PuzzleScene extends Phaser.Scene {
     this.controller.queueDirection(this.mapDirectionForSettings(direction));
   }
 
+  private refreshSafeInsets(): void {
+    this.safeInsetTop = readCssPxVariable('--safe-top');
+    this.safeInsetRight = readCssPxVariable('--safe-right');
+    this.safeInsetBottom = readCssPxVariable('--safe-bottom');
+    this.safeInsetLeft = readCssPxVariable('--safe-left');
+  }
+
+  private getPlayableViewport(viewportWidth: number, viewportHeight: number): {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    centerX: number;
+    centerY: number;
+  } {
+    const extraTop = this.isMobileDevice ? 44 : 26;
+    const extraBottom = this.isMobileDevice ? 12 : 6;
+    const left = this.safeInsetLeft;
+    const right = this.safeInsetRight;
+    const top = this.safeInsetTop + extraTop;
+    const bottom = this.safeInsetBottom + extraBottom;
+    const width = Math.max(1, viewportWidth - left - right);
+    const height = Math.max(1, viewportHeight - top - bottom);
+    return {
+      left,
+      top,
+      width,
+      height,
+      centerX: left + width * 0.5,
+      centerY: top + height * 0.5,
+    };
+  }
+
   private getEnemyTargetValues(state: GameState): number[] {
     if (this.cachedEnemyTargetsStateRef === state) {
       return this.cachedEnemyTargetValues;
@@ -300,13 +357,15 @@ class PuzzleScene extends Phaser.Scene {
     return clampByte(swop);
   }
 
-  private computeTileSize(viewportWidth: number, viewportHeight: number, levelWidth: number, levelHeight: number): number {
+  private computeTileSize(availableWidth: number, availableHeight: number, levelWidth: number, levelHeight: number): number {
     if (levelWidth <= 0 || levelHeight <= 0) {
       return 40;
     }
 
-    const widthBased = (viewportWidth * BOARD_WIDTH_RATIO) / levelWidth;
-    const heightBased = (viewportHeight * BOARD_HEIGHT_RATIO) / levelHeight;
+    const widthRatio = this.isMobileDevice ? 0.93 : BOARD_WIDTH_RATIO;
+    const heightRatio = this.isMobileDevice ? 0.84 : BOARD_HEIGHT_RATIO;
+    const widthBased = (availableWidth * widthRatio) / levelWidth;
+    const heightBased = (availableHeight * heightRatio) / levelHeight;
     const size = Math.floor(Math.min(widthBased, heightBased));
     return Phaser.Math.Clamp(size, MIN_TILE_SIZE, MAX_TILE_SIZE);
   }
@@ -322,13 +381,14 @@ class PuzzleScene extends Phaser.Scene {
     const state = snapshot.gameState;
     const levelHeight = state.grid.length;
     const levelWidth = state.grid[0]?.length ?? 0;
-    const tileSize = this.computeTileSize(viewportWidth, viewportHeight, levelWidth, levelHeight);
+    const viewport = this.getPlayableViewport(viewportWidth, viewportHeight);
+    const tileSize = this.computeTileSize(viewport.width, viewport.height, levelWidth, levelHeight);
 
     const boardWidth = levelWidth * tileSize;
     const boardHeight = levelHeight * tileSize;
-    const offsetX = Math.floor((viewportWidth - boardWidth) / 2);
-    const offsetY = Math.floor((viewportHeight - boardHeight) / 2);
-    this.applyCameraSway(snapshot, viewportWidth, viewportHeight, tileSize, time);
+    const offsetX = Math.floor(viewport.left + (viewport.width - boardWidth) / 2);
+    const offsetY = Math.floor(viewport.top + (viewport.height - boardHeight) / 2);
+    this.applyCameraSway(snapshot, viewport.centerX, viewport.centerY, tileSize, time);
     const enemyTargetValues = this.getEnemyTargetValues(state);
 
     this.terrainLayer.clear();
@@ -470,9 +530,22 @@ class PuzzleScene extends Phaser.Scene {
     }
 
     const isPaused = snapshot.screen === 'paused';
-    this.hudText.setText(
-      `${getLevelLabel(state.levelId, state.levelIndex)} (${state.levelIndex + 1}/${state.levelIds.length})  Moves ${state.moves}  Players ${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}`,
-    );
+    const hudX = 12 + this.safeInsetLeft;
+    const hudY = 10 + this.safeInsetTop;
+    this.hudText.setPosition(hudX, hudY);
+    this.hudText.setWordWrapWidth(Math.max(140, viewportWidth - this.safeInsetLeft - this.safeInsetRight - 24));
+    if (this.isMobileDevice) {
+      const levelName = state.levelId.length > 24 ? `${state.levelId.slice(0, 23)}…` : state.levelId;
+      this.hudText.setFontSize('12px');
+      this.hudText.setText(
+        `L${state.levelIndex + 1}/${state.levelIds.length}  Moves ${state.moves}  P${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}\n${levelName}`,
+      );
+    } else {
+      this.hudText.setFontSize('16px');
+      this.hudText.setText(
+        `${getLevelLabel(state.levelId, state.levelIndex)} (${state.levelIndex + 1}/${state.levelIds.length})  Moves ${state.moves}  Players ${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}`,
+      );
+    }
     this.updateFpsLabel(snapshot, viewportWidth, time);
   }
 
@@ -482,13 +555,14 @@ class PuzzleScene extends Phaser.Scene {
     levelWidth: number,
     levelHeight: number,
   ): { tileSize: number; offsetX: number; offsetY: number } {
-    const tileSize = this.computeTileSize(viewportWidth, viewportHeight, levelWidth, levelHeight);
+    const viewport = this.getPlayableViewport(viewportWidth, viewportHeight);
+    const tileSize = this.computeTileSize(viewport.width, viewport.height, levelWidth, levelHeight);
     const boardWidth = levelWidth * tileSize;
     const boardHeight = levelHeight * tileSize;
     return {
       tileSize,
-      offsetX: Math.floor((viewportWidth - boardWidth) / 2),
-      offsetY: Math.floor((viewportHeight - boardHeight) / 2),
+      offsetX: Math.floor(viewport.left + (viewport.width - boardWidth) / 2),
+      offsetY: Math.floor(viewport.top + (viewport.height - boardHeight) / 2),
     };
   }
 
@@ -530,10 +604,11 @@ class PuzzleScene extends Phaser.Scene {
       transition.sourceLevelWidth,
       transition.sourceLevelHeight,
     );
+    const viewport = this.getPlayableViewport(viewportWidth, viewportHeight);
     const portalX = placement.offsetX + (transition.portal.x + 0.5) * placement.tileSize;
     const portalY = placement.offsetY + (transition.portal.y + 0.5) * placement.tileSize;
-    const centerX = viewportWidth * 0.5;
-    const centerY = viewportHeight * 0.5;
+    const centerX = viewport.centerX;
+    const centerY = viewport.centerY;
 
     const dive = Phaser.Math.Easing.Cubic.Out(Phaser.Math.Clamp(progress / 0.55, 0, 1));
     const fill = Phaser.Math.Easing.Cubic.InOut(Phaser.Math.Clamp((progress - 0.1) / 0.66, 0, 1));
@@ -855,8 +930,8 @@ class PuzzleScene extends Phaser.Scene {
 
   private applyCameraSway(
     snapshot: ControllerSnapshot,
-    viewportWidth: number,
-    viewportHeight: number,
+    centerX: number,
+    centerY: number,
     tileSize: number,
     time: number,
   ): void {
@@ -892,12 +967,12 @@ class PuzzleScene extends Phaser.Scene {
     const driftX = Math.sin(time / 900) * driftAmplitude;
     const driftY = Math.cos(time / 1200) * driftAmplitude * 0.75;
 
-    camera.centerOn(viewportWidth * 0.5 + offsetX + driftX, viewportHeight * 0.5 + offsetY + driftY);
+    camera.centerOn(centerX + offsetX + driftX, centerY + offsetY + driftY);
     this.lastStateRef = snapshot.gameState;
   }
 
   private updateFpsLabel(snapshot: ControllerSnapshot, viewportWidth: number, time: number): void {
-    this.fpsText.setPosition(viewportWidth - 12, 10);
+    this.fpsText.setPosition(viewportWidth - 12 - this.safeInsetRight, 10 + this.safeInsetTop);
     if (!snapshot.settings.showFps) {
       this.fpsText.setVisible(false);
       return;

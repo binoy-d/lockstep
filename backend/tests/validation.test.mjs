@@ -4,6 +4,7 @@ import {
   validateDeleteLevelPayload,
   validateLevelId,
   validateLevelPayload,
+  normalizeStoredLevelId,
   validatePlayerName,
   validateScorePayload,
 } from '../src/validation.mjs';
@@ -35,6 +36,12 @@ test('rejects profane level names', () => {
       }),
     /level name contains blocked language/i,
   );
+});
+
+test('rejects profane level ids and normalizes stored legacy ids', () => {
+  const hardR = String.fromCharCode(110, 105, 103, 103, 101, 114);
+  assert.throws(() => validateLevelId(hardR), /level id contains blocked language/i);
+  assert.match(normalizeStoredLevelId(hardR), /^custom-level-[a-f0-9]{10}$/);
 });
 
 test('rejects invalid level payloads', () => {

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { normalizeStoredLevelName, validatePlayerName } from './validation.mjs';
+import { normalizeStoredLevelId, normalizeStoredLevelName, validatePlayerName } from './validation.mjs';
 
 function normalizeStoredPlayerName(raw) {
   try {
@@ -9,6 +9,28 @@ function normalizeStoredPlayerName(raw) {
   } catch {
     return 'Player';
   }
+}
+
+function withSuffix(base, suffix) {
+  const maxBaseLength = Math.max(3, 64 - suffix.length);
+  return `${base.slice(0, maxBaseLength)}${suffix}`;
+}
+
+function reserveUniqueLevelId(baseId, takenIds) {
+  if (!takenIds.has(baseId)) {
+    return baseId;
+  }
+
+  let attempt = 2;
+  while (attempt < 10_000) {
+    const candidate = withSuffix(baseId, `-${attempt}`);
+    if (!takenIds.has(candidate)) {
+      return candidate;
+    }
+    attempt += 1;
+  }
+
+  throw new Error('Unable to reserve unique level id for migrated level.');
 }
 
 export function createDatabase(dbPath) {
@@ -56,6 +78,12 @@ export function createDatabase(dbPath) {
     FROM user_levels;
   `);
 
+  const allLevelIdsStmt = db.prepare(`
+    SELECT id
+    FROM user_levels
+    ORDER BY created_at ASC, id ASC;
+  `);
+
   const updateScoreNameStmt = db.prepare(`
     UPDATE level_scores
     SET player_name = ?
@@ -74,25 +102,60 @@ export function createDatabase(dbPath) {
     WHERE name = ?;
   `);
 
-  for (const row of distinctScoreNamesStmt.all()) {
-    const next = normalizeStoredPlayerName(row.playerName);
-    if (next !== row.playerName) {
-      updateScoreNameStmt.run(next, row.playerName);
-    }
-  }
+  const updateLevelIdStmt = db.prepare(`
+    UPDATE user_levels
+    SET id = ?
+    WHERE id = ?;
+  `);
 
-  for (const row of distinctAuthorNamesStmt.all()) {
-    const next = normalizeStoredPlayerName(row.authorName);
-    if (next !== row.authorName) {
-      updateAuthorNameStmt.run(next, row.authorName);
-    }
-  }
+  const updateScoreLevelIdStmt = db.prepare(`
+    UPDATE level_scores
+    SET level_id = ?
+    WHERE level_id = ?;
+  `);
 
-  for (const row of distinctLevelNamesStmt.all()) {
-    const next = normalizeStoredLevelName(row.levelName);
-    if (next !== row.levelName) {
-      updateLevelNameStmt.run(next, row.levelName);
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    for (const row of distinctScoreNamesStmt.all()) {
+      const next = normalizeStoredPlayerName(row.playerName);
+      if (next !== row.playerName) {
+        updateScoreNameStmt.run(next, row.playerName);
+      }
     }
+
+    for (const row of distinctAuthorNamesStmt.all()) {
+      const next = normalizeStoredPlayerName(row.authorName);
+      if (next !== row.authorName) {
+        updateAuthorNameStmt.run(next, row.authorName);
+      }
+    }
+
+    for (const row of distinctLevelNamesStmt.all()) {
+      const next = normalizeStoredLevelName(row.levelName);
+      if (next !== row.levelName) {
+        updateLevelNameStmt.run(next, row.levelName);
+      }
+    }
+
+    const rows = allLevelIdsStmt.all();
+    const takenIds = new Set(rows.map((row) => row.id));
+    for (const row of rows) {
+      const normalized = normalizeStoredLevelId(row.id);
+      if (normalized === row.id) {
+        continue;
+      }
+
+      takenIds.delete(row.id);
+      const nextId = reserveUniqueLevelId(normalized, takenIds);
+      updateScoreLevelIdStmt.run(nextId, row.id);
+      updateLevelIdStmt.run(nextId, row.id);
+      takenIds.add(nextId);
+    }
+
+    db.exec('COMMIT;');
+  } catch (error) {
+    db.exec('ROLLBACK;');
+    throw error;
   }
 
   const listLevelsStmt = db.prepare(`

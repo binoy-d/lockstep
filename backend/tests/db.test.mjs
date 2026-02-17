@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createDatabase } from '../src/db.mjs';
+import { normalizeStoredLevelId } from '../src/validation.mjs';
 
 function makeTempPath(name) {
   return join(tmpdir(), `puzzle-backend-${name}-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
@@ -121,22 +122,25 @@ test('normalizes legacy offensive player names on startup', () => {
       INSERT INTO user_levels(id, name, text, author_name, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?);
     `)
-    .run('map-x', hardR, '###\n#P!\n###', 'GAY', 1, 1);
+    .run(hardR, hardR, '###\n#P!\n###', 'GAY', 1, 1);
 
   sqlite
     .prepare(`
       INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
       VALUES (?, ?, ?, ?, ?);
     `)
-    .run('map-x', 'GAY', 12, 1200, 1);
+    .run(hardR, 'GAY', 12, 1200, 1);
   sqlite.close();
 
   const db = createDatabase(path);
+  const expectedLevelId = normalizeStoredLevelId(hardR);
   const levels = db.listLevels();
-  const scores = db.getTopScores('map-x', 10);
+  const scores = db.getTopScores(expectedLevelId, 10);
+  assert.equal(levels[0].id, expectedLevelId);
   assert.equal(levels[0].name, 'Custom Level');
   assert.equal(levels[0].authorName, 'Issac');
   assert.equal(scores[0].playerName, 'Issac');
+  assert.equal(db.getTopScores(hardR, 10).length, 0);
 
   rmSync(path, { force: true });
 });

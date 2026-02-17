@@ -9,6 +9,7 @@ Lockstep is a browser-first puzzle game where all players move together every tu
 - Backend: Node.js + SQLite (custom levels + per-level top-10 scores)
 - Tests: Vitest (web), Node test runner (backend)
 - CI: GitHub Actions (`lint`, `test`, `build`)
+- Deploy: GitHub Actions manual workflow (`deploy-production`)
 
 ## Quick Start (Docker, one command)
 
@@ -90,7 +91,25 @@ npm run build
 - `web/`: game client (core logic, runtime, UI, editor, assets)
 - `backend/`: API for user-created levels and leaderboards
 - `.github/workflows/web-ci.yml`: CI pipeline
+- `.github/workflows/deploy-production.yml`: manual production deploy via SSH
 - `docker-compose.yml`: one-command local stack
+
+## Production Deploy (GitHub Actions)
+
+This repo is public, so GitHub-hosted runners are free for workflow usage.
+
+Deploy steps:
+
+1. Add repository secrets:
+   - `DEPLOY_HOST` (e.g. `ssh.binoy.co`)
+   - `DEPLOY_USER` (e.g. `daniel`)
+   - `DEPLOY_PASSWORD` (server SSH password)
+2. In GitHub, run workflow: `Actions -> deploy-production -> Run workflow`.
+3. The job SSHes to `/home/daniel/dev/lockstep`, pulls `main`, and runs:
+   - `docker-compose up -d --build`
+
+Safety guard:
+- The workflow job only runs when `github.event.repository.private == false`, so it is blocked if the repo ever becomes private.
 
 ## Levels
 
