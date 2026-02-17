@@ -158,6 +158,8 @@ export class OverlayUI {
 
   private readonly levelSelectSearchInput: HTMLInputElement;
 
+  private readonly levelSelectScopeSelect: HTMLSelectElement;
+
   private readonly levelSelectSearchEmpty: HTMLElement;
 
   private readonly levelSelectCurrentText: HTMLElement;
@@ -380,6 +382,7 @@ export class OverlayUI {
     this.levelSelect = asElement<HTMLSelectElement>(this.root, '#level-select-input');
     this.levelSelectGrid = asElement<HTMLElement>(this.root, '#level-select-grid');
     this.levelSelectSearchInput = asElement<HTMLInputElement>(this.root, '#level-select-search-input');
+    this.levelSelectScopeSelect = asElement<HTMLSelectElement>(this.root, '#level-select-scope-select');
     this.levelSelectSearchEmpty = asElement<HTMLElement>(this.root, '#level-select-search-empty');
     this.levelSelectCurrentText = asElement<HTMLElement>(this.root, '#level-select-current');
     this.statusText = asElement<HTMLElement>(this.root, '#menu-status');
@@ -563,11 +566,26 @@ export class OverlayUI {
 
       <section class="menu-panel menu-panel-level-select-page" data-panel="level-select" hidden>
         <header class="level-select-header">
-          <div>
+          <div class="level-select-header-copy">
             <h2>Level Select</h2>
             <p>Pick a map to play, copy any map into the editor, or create a blank one with +.</p>
           </div>
           <div class="level-select-header-actions">
+            <button type="button" id="btn-level-start">Play Selected</button>
+            <button type="button" id="btn-level-back">Back</button>
+          </div>
+        </header>
+
+        <div class="level-select-controls">
+          <div class="level-select-control-field">
+            <label for="level-select-scope-select" class="level-select-search-label">Show</label>
+            <select id="level-select-scope-select">
+              <option value="all">All levels</option>
+              <option value="builtin">Built-in levels</option>
+              <option value="mine">Levels I built</option>
+            </select>
+          </div>
+          <div class="level-select-control-field level-select-control-field-search">
             <label for="level-select-search-input" class="level-select-search-label">Search by level name</label>
             <input
               id="level-select-search-input"
@@ -576,10 +594,8 @@ export class OverlayUI {
               autocomplete="off"
               spellcheck="false"
             />
-            <button type="button" id="btn-level-start">Play Selected</button>
-            <button type="button" id="btn-level-back">Back</button>
           </div>
-        </header>
+        </div>
 
         <div class="level-select-layout">
           <section class="level-select-grid-panel">
@@ -879,6 +895,10 @@ export class OverlayUI {
     });
 
     this.levelSelectSearchInput.addEventListener('input', () => {
+      this.applyLevelSearchFilter();
+    });
+
+    this.levelSelectScopeSelect.addEventListener('change', () => {
       this.applyLevelSearchFilter();
     });
 
@@ -1406,14 +1426,60 @@ export class OverlayUI {
     return getLevelName(level.id, index, level.name);
   }
 
+  private currentLevelFilterScope(): 'all' | 'builtin' | 'mine' {
+    const scope = this.levelSelectScopeSelect.value;
+    if (scope === 'builtin' || scope === 'mine') {
+      return scope;
+    }
+
+    return 'all';
+  }
+
+  private isOwnedByCurrentUser(levelId: string, levelIndex: number): boolean {
+    if (levelIndex < this.builtInLevelCount) {
+      return false;
+    }
+
+    const user = this.authState.user;
+    if (!this.authState.authenticated || !user) {
+      return false;
+    }
+
+    const owner = this.customLevelOwners.get(levelId);
+    if (!owner) {
+      return false;
+    }
+
+    if (owner.ownerUserId !== null) {
+      return owner.ownerUserId === user.id;
+    }
+
+    if (owner.ownerUsername) {
+      return owner.ownerUsername === user.username;
+    }
+
+    return false;
+  }
+
   private applyLevelSearchFilter(): void {
     const query = this.levelSelectSearchInput.value.trim().toLowerCase();
+    const scope = this.currentLevelFilterScope();
     let visibleCount = 0;
 
     for (const [index, card] of this.levelSelectCardContainers) {
       const level = this.lastSnapshot?.levels[index];
-      const levelName = level ? this.getDisplayLevelName(level, index).toLowerCase() : '';
-      const matches = query.length === 0 || levelName.includes(query);
+      if (!level) {
+        card.hidden = true;
+        continue;
+      }
+
+      const levelName = this.getDisplayLevelName(level, index).toLowerCase();
+      const matchesQuery = query.length === 0 || levelName.includes(query);
+      const matchesScope =
+        scope === 'all' ||
+        (scope === 'builtin' && index < this.builtInLevelCount) ||
+        (scope === 'mine' && this.isOwnedByCurrentUser(level.id, index));
+      const matches = matchesQuery && matchesScope;
       card.hidden = !matches;
       if (matches) {
         visibleCount += 1;
@@ -1422,9 +1488,14 @@ export class OverlayUI {
 
     const addCard = this.levelSelectGrid.querySelector<HTMLElement>('.level-card-add');
     if (addCard) {
-      addCard.hidden = query.length > 0;
+      addCard.hidden = query.length > 0 || scope !== 'all';
     }
 
+    if (scope === 'mine' && !this.authState.authenticated) {
+      this.levelSelectSearchEmpty.textContent = 'Sign in to view levels you built.';
+    } else {
+      this.levelSelectSearchEmpty.textContent = 'No levels match this filter.';
+    }
     this.levelSelectSearchEmpty.hidden = visibleCount > 0;
 
     const snapshot = this.lastSnapshot;

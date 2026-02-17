@@ -680,8 +680,12 @@ button:disabled {
 .level-select-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 14px;
+}
+
+.level-select-header-copy {
+  min-width: 0;
 }
 
 .level-select-header h2 {
@@ -694,18 +698,44 @@ button:disabled {
 }
 
 .level-select-header-actions {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  width: min(220px, 100%);
+  justify-content: flex-end;
 }
 
 .level-select-search-label {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.level-select-controls {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(122, 173, 219, 0.24);
+  border-radius: 14px;
+  background: linear-gradient(140deg, rgba(8, 15, 26, 0.86), rgba(10, 25, 40, 0.78));
+}
+
+.level-select-control-field {
+  display: grid;
+  gap: 6px;
+}
+
+.level-select-control-field-search {
+  min-width: 0;
+}
+
+.level-select-controls input,
+.level-select-controls select {
+  width: 100%;
 }
 
 .level-select-header-actions button {
-  width: 100%;
+  min-width: 130px;
 }
 
 .level-select-layout {
@@ -1288,7 +1318,18 @@ button:disabled {
   }
 
   .level-select-header-actions {
+    justify-content: stretch;
     width: 100%;
+  }
+
+  .level-select-header-actions button {
+    width: 100%;
+  }
+
+  .level-select-controls {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px;
   }
 
   .level-select-layout {
