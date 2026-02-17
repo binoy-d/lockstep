@@ -20,6 +20,7 @@ import type { Direction, GameState } from '../core/types';
 
 const FIXED_STEP_MS = 1000 / 60;
 const MIN_TILE_SIZE = 22;
+const MOBILE_MIN_TILE_SIZE = 14;
 const MAX_TILE_SIZE = 80;
 const BOARD_WIDTH_RATIO = 0.96;
 const BOARD_HEIGHT_RATIO = 0.9;
@@ -39,6 +40,14 @@ function rgb(r: number, g: number, b: number): number {
 
 function fract(value: number): number {
   return value - Math.floor(value);
+}
+
+function clampOrMidpoint(value: number, min: number, max: number): number {
+  if (min <= max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  return (min + max) * 0.5;
 }
 
 function isLikelyMobileDevice(): boolean {
@@ -409,7 +418,8 @@ class PuzzleScene extends Phaser.Scene {
     const widthBased = (availableWidth * widthRatio) / levelWidth;
     const heightBased = (availableHeight * heightRatio) / levelHeight;
     const size = Math.floor(Math.min(widthBased, heightBased));
-    return Phaser.Math.Clamp(size, MIN_TILE_SIZE, MAX_TILE_SIZE);
+    const minTileSize = this.isMobileDevice ? MOBILE_MIN_TILE_SIZE : MIN_TILE_SIZE;
+    return Phaser.Math.Clamp(size, minTileSize, MAX_TILE_SIZE);
   }
 
   private renderSnapshot(
@@ -428,9 +438,56 @@ class PuzzleScene extends Phaser.Scene {
 
     const boardWidth = levelWidth * tileSize;
     const boardHeight = levelHeight * tileSize;
-    const offsetX = Math.floor(viewport.left + (viewport.width - boardWidth) / 2);
-    const offsetY = Math.floor(viewport.top + (viewport.height - boardHeight) / 2);
-    this.applyCameraSway(snapshot, viewport.centerX, viewport.centerY, tileSize, time);
+    let offsetX = Math.floor(viewport.left + (viewport.width - boardWidth) / 2);
+    let offsetY = Math.floor(viewport.top + (viewport.height - boardHeight) / 2);
+
+    let cameraClamp:
+      | {
+          minX: number;
+          maxX: number;
+          minY: number;
+          maxY: number;
+        }
+      | null = null;
+
+    if (this.isMobileDevice && state.players.length > 0) {
+      const playerCentersX = state.players.map((player) => (player.x + 0.5) * tileSize);
+      const playerCentersY = state.players.map((player) => (player.y + 0.5) * tileSize);
+      const minPlayerCenterX = Math.min(...playerCentersX);
+      const maxPlayerCenterX = Math.max(...playerCentersX);
+      const minPlayerCenterY = Math.min(...playerCentersY);
+      const maxPlayerCenterY = Math.max(...playerCentersY);
+
+      const playerMarginX = Math.max(12, tileSize * 0.9);
+      const playerMarginY = Math.max(16, tileSize * 1.05);
+
+      const minOffsetX = viewport.left + playerMarginX - minPlayerCenterX;
+      const maxOffsetX = viewport.left + viewport.width - playerMarginX - maxPlayerCenterX;
+      const minOffsetY = viewport.top + playerMarginY - minPlayerCenterY;
+      const maxOffsetY = viewport.top + viewport.height - playerMarginY - maxPlayerCenterY;
+
+      offsetX = Math.round(clampOrMidpoint(offsetX, minOffsetX, maxOffsetX));
+      offsetY = Math.round(clampOrMidpoint(offsetY, minOffsetY, maxOffsetY));
+
+      const minPlayerScreenX = offsetX + minPlayerCenterX;
+      const maxPlayerScreenX = offsetX + maxPlayerCenterX;
+      const minPlayerScreenY = offsetY + minPlayerCenterY;
+      const maxPlayerScreenY = offsetY + maxPlayerCenterY;
+
+      const minCameraDeltaX = maxPlayerScreenX - (viewport.left + viewport.width - playerMarginX);
+      const maxCameraDeltaX = minPlayerScreenX - (viewport.left + playerMarginX);
+      const minCameraDeltaY = maxPlayerScreenY - (viewport.top + viewport.height - playerMarginY);
+      const maxCameraDeltaY = minPlayerScreenY - (viewport.top + playerMarginY);
+
+      cameraClamp = {
+        minX: viewport.centerX + Math.min(minCameraDeltaX, maxCameraDeltaX),
+        maxX: viewport.centerX + Math.max(minCameraDeltaX, maxCameraDeltaX),
+        minY: viewport.centerY + Math.min(minCameraDeltaY, maxCameraDeltaY),
+        maxY: viewport.centerY + Math.max(minCameraDeltaY, maxCameraDeltaY),
+      };
+    }
+
+    this.applyCameraSway(snapshot, viewport.centerX, viewport.centerY, tileSize, time, cameraClamp);
     const enemyTargetValues = this.getEnemyTargetValues(state);
 
     this.terrainLayer.clear();
@@ -572,15 +629,19 @@ class PuzzleScene extends Phaser.Scene {
     }
 
     const isPaused = snapshot.screen === 'paused';
-    const hudX = 12 + this.safeInsetLeft;
-    const hudY = 10 + this.safeInsetTop;
+    const hudInsetX = this.isMobileDevice ? 20 : 12;
+    const hudInsetY = this.isMobileDevice ? 18 : 10;
+    const hudX = hudInsetX + this.safeInsetLeft;
+    const hudY = hudInsetY + this.safeInsetTop;
     this.hudText.setPosition(hudX, hudY);
-    this.hudText.setWordWrapWidth(Math.max(140, viewportWidth - this.safeInsetLeft - this.safeInsetRight - 24));
+    this.hudText.setWordWrapWidth(
+      Math.max(140, viewportWidth - this.safeInsetLeft - this.safeInsetRight - hudInsetX * 2),
+    );
     if (this.isMobileDevice) {
-      const levelName = state.levelId.length > 24 ? `${state.levelId.slice(0, 23)}…` : state.levelId;
+      const levelName = state.levelId.length > 20 ? `${state.levelId.slice(0, 19)}…` : state.levelId;
       this.hudText.setFontSize('12px');
       this.hudText.setText(
-        `L${state.levelIndex + 1}/${state.levelIds.length}  Moves ${state.moves}  P${state.players.length}/${state.totalPlayers}${isPaused ? '  [PAUSED]' : ''}\n${levelName}`,
+        `L${state.levelIndex + 1}/${state.levelIds.length} • M${state.moves} • P${state.players.length}/${state.totalPlayers}${isPaused ? ' • PAUSED' : ''}\n${levelName}`,
       );
     } else {
       this.hudText.setFontSize('16px');
@@ -987,6 +1048,14 @@ class PuzzleScene extends Phaser.Scene {
     centerY: number,
     tileSize: number,
     time: number,
+    centerClamp:
+      | {
+          minX: number;
+          maxX: number;
+          minY: number;
+          maxY: number;
+        }
+      | null = null,
   ): void {
     if (this.isWinTransitionActive(snapshot.winTransition)) {
       this.lastStateRef = snapshot.gameState;
@@ -1012,20 +1081,35 @@ class PuzzleScene extends Phaser.Scene {
     this.cameraSwayOffsetX *= settle;
     this.cameraSwayOffsetY *= settle;
 
-    const maxOffset = Math.max(5, tileSize * 0.2);
+    const maxOffset = this.isMobileDevice ? Math.max(1.5, tileSize * 0.06) : Math.max(5, tileSize * 0.2);
     const offsetX = Phaser.Math.Clamp(this.cameraSwayOffsetX, -maxOffset, maxOffset);
     const offsetY = Phaser.Math.Clamp(this.cameraSwayOffsetY, -maxOffset, maxOffset);
 
-    const driftAmplitude = swayEnabled ? Math.max(0.8, tileSize * 0.02) : 0;
+    const driftAmplitude = swayEnabled
+      ? this.isMobileDevice
+        ? Math.max(0.2, tileSize * 0.008)
+        : Math.max(0.8, tileSize * 0.02)
+      : 0;
     const driftX = Math.sin(time / 900) * driftAmplitude;
     const driftY = Math.cos(time / 1200) * driftAmplitude * 0.75;
 
-    camera.centerOn(centerX + offsetX + driftX, centerY + offsetY + driftY);
+    const targetCenterX = centerX + offsetX + driftX;
+    const targetCenterY = centerY + offsetY + driftY;
+    const clampedCenterX = centerClamp
+      ? clampOrMidpoint(targetCenterX, centerClamp.minX, centerClamp.maxX)
+      : targetCenterX;
+    const clampedCenterY = centerClamp
+      ? clampOrMidpoint(targetCenterY, centerClamp.minY, centerClamp.maxY)
+      : targetCenterY;
+
+    camera.centerOn(clampedCenterX, clampedCenterY);
     this.lastStateRef = snapshot.gameState;
   }
 
   private updateFpsLabel(snapshot: ControllerSnapshot, viewportWidth: number, time: number): void {
-    this.fpsText.setPosition(viewportWidth - 12 - this.safeInsetRight, 10 + this.safeInsetTop);
+    const insetX = this.isMobileDevice ? 20 : 12;
+    const insetY = this.isMobileDevice ? 18 : 10;
+    this.fpsText.setPosition(viewportWidth - insetX - this.safeInsetRight, insetY + this.safeInsetTop);
     if (!snapshot.settings.showFps) {
       this.fpsText.setVisible(false);
       return;
