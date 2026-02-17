@@ -1,8 +1,13 @@
 import { createServer } from 'node:http';
 import { URL } from 'node:url';
-import { DEFAULT_PORT, DB_PATH } from './config.mjs';
+import { ADMIN_PASSWORD, DEFAULT_PORT, DB_PATH } from './config.mjs';
 import { createDatabase } from './db.mjs';
-import { validateLevelPayload, validateLevelId, validateScorePayload } from './validation.mjs';
+import {
+  validateDeleteLevelPayload,
+  validateLevelPayload,
+  validateLevelId,
+  validateScorePayload,
+} from './validation.mjs';
 
 const db = createDatabase(DB_PATH);
 
@@ -73,6 +78,25 @@ const server = createServer(async (req, res) => {
       const payload = validateLevelPayload(body);
       const saved = db.upsertLevel(payload);
       sendJson(res, 200, { level: saved });
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === '/api/admin/delete-level') {
+      const body = await readJsonBody(req);
+      const payload = validateDeleteLevelPayload(body);
+
+      if (payload.password !== ADMIN_PASSWORD) {
+        sendJson(res, 403, { error: 'Invalid admin password.' });
+        return;
+      }
+
+      const deleted = db.deleteLevel(payload.levelId);
+      if (!deleted) {
+        sendJson(res, 404, { error: `Level ${payload.levelId} not found.` });
+        return;
+      }
+
+      sendJson(res, 200, { ok: true, levelId: payload.levelId });
       return;
     }
 

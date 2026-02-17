@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  validateDeleteLevelPayload,
   validateLevelId,
   validateLevelPayload,
   validatePlayerName,
@@ -56,5 +57,33 @@ test('validates score payload constraints', () => {
         durationMs: 10,
       }),
     /player name|moves/i,
+  );
+});
+
+test('validates admin delete payload constraints', () => {
+  const payload = validateDeleteLevelPayload({
+    levelId: 'custom-level-15',
+    password: 'dick',
+  });
+
+  assert.equal(payload.levelId, 'custom-level-15');
+  assert.equal(payload.password, 'dick');
+
+  assert.throws(
+    () =>
+      validateDeleteLevelPayload({
+        levelId: 'custom level',
+        password: 'dick',
+      }),
+    /level id/i,
+  );
+
+  assert.throws(
+    () =>
+      validateDeleteLevelPayload({
+        levelId: 'custom-level-15',
+        password: '',
+      }),
+    /password/i,
   );
 });

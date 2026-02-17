@@ -6,6 +6,7 @@ services:
     environment:
       PORT: "8787"
       DB_PATH: /app/data/puzzle.sqlite
+      ADMIN_PASSWORD: "dick"
     ports:
       - "8787:8787"
     volumes:

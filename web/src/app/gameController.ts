@@ -14,6 +14,7 @@ export type Screen = 'intro' | 'main' | 'level-select' | 'settings' | 'editor' |
 
 const DEATH_ANIMATION_MS = 620;
 const WIN_TRANSITION_MS = 980;
+const EDITOR_TEST_LEVEL_ID_PREFIX = '__editor-test-level';
 
 export interface EnemyDeathAnimationSnapshot extends EnemyImpact {
   kind: 'enemy';
@@ -390,6 +391,35 @@ export class GameController {
     return levelIndex;
   }
 
+  public removeLevel(levelId: string): boolean {
+    const index = this.levels.findIndex((entry) => entry.id === levelId);
+    if (index === -1 || this.levels.length <= 1) {
+      return false;
+    }
+
+    this.levels.splice(index, 1);
+
+    if (this.selectedLevelIndex > index) {
+      this.selectedLevelIndex -= 1;
+    } else if (this.selectedLevelIndex >= this.levels.length) {
+      this.selectedLevelIndex = this.levels.length - 1;
+    }
+
+    this.selectedLevelIndex = Math.max(0, this.selectedLevelIndex);
+    this.gameState = createInitialState(this.levels, this.selectedLevelIndex);
+
+    if (this.screen === 'playing' || this.screen === 'paused') {
+      this.screen = 'intro';
+    }
+
+    this.statusMessage = `Deleted level ${levelId}`;
+    this.levelStartedAtMs = Date.now();
+    this.inputQueue.length = 0;
+    this.clearTransientEffects();
+    this.emit();
+    return true;
+  }
+
   public setMusicVolume(volume: number): void {
     this.settings = {
       ...this.settings,
@@ -456,6 +486,10 @@ export class GameController {
 
   private async submitCompletedScore(levelId: string, moves: number, durationMs: number): Promise<void> {
     if (!this.playerName) {
+      return;
+    }
+
+    if (levelId.startsWith(EDITOR_TEST_LEVEL_ID_PREFIX)) {
       return;
     }
 

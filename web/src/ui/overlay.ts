@@ -11,12 +11,15 @@ import {
   resizeGrid,
   sanitizeDimension,
   serializeGrid,
+  shouldPaintOnHover,
   validateGridForEditor,
 } from '../editor/levelEditorUtils';
-import { fetchTopScores, saveCustomLevel, type LevelScoreRecord } from '../runtime/backendApi';
+import { deleteCustomLevel, fetchTopScores, saveCustomLevel, type LevelScoreRecord } from '../runtime/backendApi';
 import { isTextInputFocused } from '../runtime/inputFocus';
 import { getLevelLabel } from '../runtime/levelMeta';
 import { LockstepIntroCinematic } from './introCinematic';
+
+const EDITOR_TEST_LEVEL_ID = '__editor-test-level';
 
 function asElement<T extends HTMLElement>(root: ParentNode, selector: string): T {
   const element = root.querySelector(selector);
@@ -178,11 +181,21 @@ export class OverlayUI {
 
   private readonly editorSavePlayButton: HTMLButtonElement;
 
+  private readonly editorDeleteButton: HTMLButtonElement;
+
+  private readonly pauseTestBackButton: HTMLButtonElement;
+
   private editorPaletteButtons = new Map<string, HTMLButtonElement>();
 
   private editorGrid: string[][] = this.createBlankGrid(25, 16);
 
   private editorTile = '#';
+
+  private isEditorPainting = false;
+
+  private editorTestingPublishLevelId: string | null = null;
+
+  private editorLoadedLevelId: string | null = null;
 
   private lastSnapshot: ControllerSnapshot | null = null;
 
@@ -264,6 +277,8 @@ export class OverlayUI {
     this.editorPaletteRoot = asElement<HTMLElement>(this.root, '#editor-palette');
     this.editorSaveButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save');
     this.editorSavePlayButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save-play');
+    this.editorDeleteButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-delete');
+    this.pauseTestBackButton = asElement<HTMLButtonElement>(this.root, '#btn-test-back-editor');
 
     this.buildPalette();
     this.renderEditorGrid();
@@ -432,8 +447,9 @@ export class OverlayUI {
             <section class="editor-card">
               <h3>Save</h3>
               <div class="button-row editor-card-buttons">
-                <button type="button" id="btn-editor-save">Save Level</button>
-                <button type="button" id="btn-editor-save-play">Save + Play</button>
+                <button type="button" id="btn-editor-save">Publish Level</button>
+                <button type="button" id="btn-editor-save-play">Test + Play</button>
+                <button type="button" id="btn-editor-delete" class="button-danger">Delete Published Level</button>
                 <button type="button" id="btn-editor-export">Download .txt</button>
               </div>
               <div class="editor-feedback" id="editor-feedback" aria-live="polite"></div>
@@ -455,6 +471,7 @@ export class OverlayUI {
           <button type="button" id="btn-resume">Resume</button>
           <button type="button" id="btn-restart">Restart</button>
           <button type="button" id="btn-pause-level-select">Level Select</button>
+          <button type="button" id="btn-test-back-editor" hidden>Back to Editor (Test)</button>
           <button type="button" id="btn-main-menu">Main Menu</button>
           <button type="button" id="btn-pause-settings">Settings</button>
         </div>
@@ -550,6 +567,10 @@ export class OverlayUI {
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-main-menu').addEventListener('click', () => {
+      if (this.editorTestingPublishLevelId) {
+        this.returnFromEditorTest();
+        return;
+      }
       this.controller.openMainMenu();
     });
 
@@ -575,11 +596,15 @@ export class OverlayUI {
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-editor-save').addEventListener('click', () => {
-      void this.saveEditorLevel(false);
+      void this.publishEditorLevel();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-editor-save-play').addEventListener('click', () => {
-      void this.saveEditorLevel(true);
+      this.startEditorTestPlay();
+    });
+
+    this.editorDeleteButton.addEventListener('click', () => {
+      void this.deleteEditorLevel();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-editor-export').addEventListener('click', () => {
@@ -588,6 +613,10 @@ export class OverlayUI {
 
     asElement<HTMLButtonElement>(this.root, '#btn-editor-back').addEventListener('click', () => {
       this.controller.openMainMenu();
+    });
+
+    this.pauseTestBackButton.addEventListener('click', () => {
+      this.returnFromEditorTest();
     });
 
     this.playerNameInput.addEventListener('input', () => {
@@ -632,13 +661,41 @@ export class OverlayUI {
       this.controller.setLightingEnabled(this.introLightingToggle.checked);
     });
 
-    this.editorGridRoot.addEventListener('click', (event) => {
+    this.editorGridRoot.addEventListener('pointerdown', (event) => {
       const target = event.target as HTMLElement;
-      if (!target.dataset.x || !target.dataset.y) {
+      if ((event.buttons & 1) !== 1 || !target.dataset.x || !target.dataset.y) {
+        return;
+      }
+
+      this.isEditorPainting = true;
+      this.editorGridRoot.setPointerCapture(event.pointerId);
+      this.paintGridCell(target);
+      event.preventDefault();
+    });
+
+    this.editorGridRoot.addEventListener('pointermove', (event) => {
+      if (!shouldPaintOnHover(this.isEditorPainting, event.buttons)) {
+        return;
+      }
+
+      const target = this.editorCellFromPointer(event);
+      if (!target) {
         return;
       }
 
       this.paintGridCell(target);
+    });
+
+    this.editorGridRoot.addEventListener('pointerup', () => {
+      this.isEditorPainting = false;
+    });
+
+    this.editorGridRoot.addEventListener('pointercancel', () => {
+      this.isEditorPainting = false;
+    });
+
+    this.editorGridRoot.addEventListener('pointerleave', () => {
+      this.isEditorPainting = false;
     });
 
     window.addEventListener('keydown', (event) => {
@@ -722,6 +779,11 @@ export class OverlayUI {
     this.syncLevelOptions(snapshot);
     this.syncEditorSourceOptions(snapshot);
 
+    if (screenChanged && snapshot.screen === 'main' && this.editorTestingPublishLevelId) {
+      this.returnFromEditorTest();
+      return;
+    }
+
     if (this.playerNameInput.value !== snapshot.playerName) {
       this.playerNameInput.value = snapshot.playerName;
     }
@@ -753,6 +815,8 @@ export class OverlayUI {
     this.introStartButton.disabled = !canPlay;
     this.editorSaveButton.disabled = !canPlay;
     this.editorSavePlayButton.disabled = !canPlay;
+    this.editorDeleteButton.disabled = false;
+    this.pauseTestBackButton.hidden = !this.editorTestingPublishLevelId;
 
     this.panels.intro.hidden = snapshot.screen !== 'intro';
     this.panels.main.hidden = snapshot.screen !== 'main';
@@ -1090,6 +1154,16 @@ export class OverlayUI {
     this.editorFeedback.classList.toggle('editor-feedback-error', isError);
   }
 
+  private editorCellFromPointer(event: PointerEvent): HTMLElement | null {
+    const hit = document.elementFromPoint(event.clientX, event.clientY);
+    if (!hit) {
+      return null;
+    }
+
+    const cell = hit.closest('.editor-grid-cell');
+    return cell instanceof HTMLElement ? cell : null;
+  }
+
   private paintGridCell(target: HTMLElement): void {
     const x = Number.parseInt(target.dataset.x ?? '-1', 10);
     const y = Number.parseInt(target.dataset.y ?? '-1', 10);
@@ -1101,13 +1175,19 @@ export class OverlayUI {
       return;
     }
 
+    if (this.editorGrid[y][x] === this.editorTile) {
+      return;
+    }
+
     this.editorGrid[y][x] = this.editorTile;
     this.renderEditorGrid();
   }
 
   private loadLevelIntoEditor(level: ParsedLevel): void {
     this.editorGrid = cloneGrid(level.grid);
-    this.editorIdInput.value = this.defaultEditorId();
+    this.editorLoadedLevelId = level.id;
+    this.editorIdInput.value =
+      level.id === EDITOR_TEST_LEVEL_ID && this.editorTestingPublishLevelId ? this.editorTestingPublishLevelId : level.id;
     this.renderEditorGrid();
     this.showEditorFeedback(`Loaded ${level.id}`);
   }
@@ -1133,6 +1213,7 @@ export class OverlayUI {
     const height = sanitizeDimension(Number.parseInt(this.editorHeightInput.value, 10), this.editorGrid.length || 16);
 
     this.editorGrid = this.createBlankGrid(width, height);
+    this.editorLoadedLevelId = null;
     this.editorIdInput.value = this.defaultEditorId();
     this.renderEditorGrid();
     this.showEditorFeedback('Created blank level template.');
@@ -1151,7 +1232,11 @@ export class OverlayUI {
     const allIds = new Set(snapshot.levels.map((level) => level.id));
     let candidate = baseId || this.defaultEditorId();
 
-    if (!allIds.has(candidate)) {
+    if (
+      !allIds.has(candidate) ||
+      candidate === this.editorLoadedLevelId ||
+      candidate === this.editorTestingPublishLevelId
+    ) {
       return candidate;
     }
 
@@ -1165,27 +1250,103 @@ export class OverlayUI {
     return candidate;
   }
 
-  private async saveEditorLevel(playAfterSave: boolean): Promise<void> {
+  private getPublishLevelId(snapshot: ControllerSnapshot): string {
+    const requestedId = levelIdFromInput(this.editorIdInput.value);
+    const publishId = this.resolveSaveId(requestedId, snapshot);
+    this.editorIdInput.value = publishId;
+    return publishId;
+  }
+
+  private readEditorAuthorName(): string | null {
+    const authorName = this.controller.getPlayerName();
+    if (!authorName) {
+      this.showEditorFeedback('Enter a player name before testing or publishing levels.', true);
+      this.editorPlayerNameInput.focus();
+      return null;
+    }
+
+    return authorName;
+  }
+
+  private validateEditorGrid(): { errors: string[]; warnings: string[] } | null {
+    const validation = validateGridForEditor(this.editorGrid);
+    if (validation.errors.length > 0) {
+      this.showEditorFeedback(validation.errors.join(' '), true);
+      return null;
+    }
+
+    return validation;
+  }
+
+  private startEditorTestPlay(): void {
     const snapshot = this.lastSnapshot;
     if (!snapshot) {
       return;
     }
 
-    const authorName = this.controller.getPlayerName();
+    if (!this.readEditorAuthorName()) {
+      return;
+    }
+
+    if (!this.validateEditorGrid()) {
+      return;
+    }
+
+    const publishLevelId = this.getPublishLevelId(snapshot);
+    const runtimeLevelId = `${EDITOR_TEST_LEVEL_ID}-${publishLevelId}`;
+    const text = serializeGrid(this.editorGrid);
+
+    try {
+      ensureParseableLevel(runtimeLevelId, this.editorGrid);
+    } catch (error) {
+      this.showEditorFeedback(String(error), true);
+      return;
+    }
+
+    const parsed = parseLevelText(runtimeLevelId, text);
+    const levelIndex = this.controller.upsertLevel(parsed);
+    this.editorTestingPublishLevelId = publishLevelId;
+    this.editorLoadedLevelId = publishLevelId;
+    this.controller.startLevel(levelIndex);
+    this.showEditorFeedback(
+      `Testing ${publishLevelId}. Pause and use "Back to Editor (Test)" to keep iterating before publish.`,
+    );
+  }
+
+  private returnFromEditorTest(): void {
+    if (!this.editorTestingPublishLevelId) {
+      this.controller.openEditor();
+      return;
+    }
+
+    const publishLevelId = this.editorTestingPublishLevelId;
+    const runtimeLevelId = `${EDITOR_TEST_LEVEL_ID}-${publishLevelId}`;
+    this.editorTestingPublishLevelId = null;
+    this.controller.removeLevel(runtimeLevelId);
+    this.controller.openEditor();
+    this.editorLoadedLevelId = publishLevelId;
+    this.editorIdInput.value = publishLevelId;
+    this.renderEditorGrid();
+    this.showEditorFeedback(`Back in editor for ${publishLevelId}. Publish when ready.`);
+  }
+
+  private async publishEditorLevel(): Promise<void> {
+    const snapshot = this.lastSnapshot;
+    if (!snapshot) {
+      return;
+    }
+
+    const authorName = this.readEditorAuthorName();
     if (!authorName) {
-      this.showEditorFeedback('Enter a player name before saving or playing levels.', true);
-      this.editorPlayerNameInput.focus();
       return;
     }
 
-    const validation = validateGridForEditor(this.editorGrid);
-    if (validation.errors.length > 0) {
-      this.showEditorFeedback(validation.errors.join(' '), true);
+    const validation = this.validateEditorGrid();
+    if (!validation) {
       return;
     }
 
-    const requestedId = levelIdFromInput(this.editorIdInput.value);
-    const levelId = this.resolveSaveId(requestedId, snapshot);
+    const levelId = this.getPublishLevelId(snapshot);
 
     try {
       ensureParseableLevel(levelId, this.editorGrid);
@@ -1205,23 +1366,49 @@ export class OverlayUI {
       });
 
       const parsed = parseLevelText(saved.id, saved.text);
-      const levelIndex = this.controller.upsertLevel(parsed);
+      this.controller.upsertLevel(parsed);
+      this.editorLoadedLevelId = saved.id;
       this.editorIdInput.value = saved.id;
       this.scoreCache.delete(saved.id);
 
-      if (playAfterSave) {
-        this.controller.startLevel(levelIndex);
-        return;
-      }
-
       if (validation.warnings.length > 0) {
-        this.showEditorFeedback(`Saved ${saved.id}. Warning: ${validation.warnings.join(' ')}`);
+        this.showEditorFeedback(`Published ${saved.id}. Warning: ${validation.warnings.join(' ')}`);
         return;
       }
 
-      this.showEditorFeedback(`Saved ${saved.id} to backend.`);
+      this.showEditorFeedback(`Published ${saved.id} to backend.`);
     } catch (error) {
-      this.showEditorFeedback(`Save failed: ${String(error)}`, true);
+      this.showEditorFeedback(`Publish failed: ${String(error)}`, true);
+    }
+  }
+
+  private async deleteEditorLevel(): Promise<void> {
+    const levelId = levelIdFromInput(this.editorIdInput.value);
+    if (!levelId) {
+      this.showEditorFeedback('Enter a level id to delete.', true);
+      this.editorIdInput.focus();
+      return;
+    }
+
+    const password = window.prompt(`Admin password required to delete "${levelId}"`);
+    if (password === null) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete published level "${levelId}" permanently?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await deleteCustomLevel({ levelId, password });
+      this.scoreCache.delete(levelId);
+      this.controller.removeLevel(levelId);
+      this.editorLoadedLevelId = null;
+      this.editorIdInput.value = this.defaultEditorId();
+      this.showEditorFeedback(`Deleted ${levelId}.`);
+    } catch (error) {
+      this.showEditorFeedback(`Delete failed: ${String(error)}`, true);
     }
   }
 

@@ -67,6 +67,16 @@ export function createDatabase(dbPath) {
     LIMIT ?;
   `);
 
+  const deleteLevelStmt = db.prepare(`
+    DELETE FROM user_levels
+    WHERE id = ?;
+  `);
+
+  const deleteScoresForLevelStmt = db.prepare(`
+    DELETE FROM level_scores
+    WHERE level_id = ?;
+  `);
+
   return {
     listLevels() {
       return listLevelsStmt.all();
@@ -87,6 +97,16 @@ export function createDatabase(dbPath) {
 
     getTopScores(levelId, limit = 10) {
       return topScoresStmt.all(levelId, limit);
+    },
+
+    deleteLevel(levelId) {
+      const deleted = deleteLevelStmt.run(levelId);
+      if (!deleted.changes) {
+        return false;
+      }
+
+      deleteScoresForLevelStmt.run(levelId);
+      return true;
     },
   };
 }

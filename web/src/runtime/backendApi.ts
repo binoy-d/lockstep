@@ -64,6 +64,16 @@ export async function saveCustomLevel(input: {
   return payload.level;
 }
 
+export async function deleteCustomLevel(input: {
+  levelId: string;
+  password: string;
+}): Promise<void> {
+  await requestJson<{ ok: true; levelId: string }>('/admin/delete-level', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export async function fetchTopScores(levelId: string): Promise<LevelScoreRecord[]> {
   const payload = await requestJson<{ levelId: string; scores: LevelScoreRecord[] }>(
     `/scores/${encodeURIComponent(levelId)}`,

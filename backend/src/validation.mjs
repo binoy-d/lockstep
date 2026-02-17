@@ -114,3 +114,18 @@ export function validateScorePayload(input) {
     durationMs,
   };
 }
+
+export function validateDeleteLevelPayload(input) {
+  if (!input || typeof input !== 'object') {
+    throw new Error('Delete payload must be an object.');
+  }
+
+  if (typeof input.password !== 'string' || input.password.length === 0) {
+    throw new Error('Admin password is required.');
+  }
+
+  return {
+    levelId: validateLevelId(input.levelId),
+    password: input.password,
+  };
+}

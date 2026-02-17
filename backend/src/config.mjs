@@ -5,3 +5,4 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 
 export const DEFAULT_PORT = Number.parseInt(process.env.PORT ?? '8787', 10);
 export const DB_PATH = process.env.DB_PATH ?? resolve(currentDir, '..', 'data', 'puzzle.sqlite');
+export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'dick';

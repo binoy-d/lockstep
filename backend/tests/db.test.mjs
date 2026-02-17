@@ -65,3 +65,29 @@ test('returns top 10 scores ordered by moves then duration then time', () => {
 
   rmSync(path, { force: true });
 });
+
+test('deletes a level and its scores', () => {
+  const path = makeTempPath('delete');
+  const db = createDatabase(path);
+
+  db.upsertLevel({
+    id: 'custom-level-99',
+    name: 'Delete Me',
+    text: ['###', '#P!', '###'].join('\n'),
+    authorName: 'Ava',
+  });
+
+  db.insertScore({
+    levelId: 'custom-level-99',
+    playerName: 'Binoy',
+    moves: 12,
+    durationMs: 1200,
+  });
+
+  assert.equal(db.deleteLevel('custom-level-99'), true);
+  assert.equal(db.listLevels().some((level) => level.id === 'custom-level-99'), false);
+  assert.equal(db.getTopScores('custom-level-99', 10).length, 0);
+  assert.equal(db.deleteLevel('custom-level-99'), false);
+
+  rmSync(path, { force: true });
+});
