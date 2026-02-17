@@ -348,8 +348,9 @@ class PuzzleScene extends Phaser.Scene {
     centerX: number;
     centerY: number;
   } {
-    const extraTop = this.isMobileDevice ? 44 : 26;
-    const extraBottom = this.isMobileDevice ? 12 : 6;
+    const isPortrait = viewportHeight > viewportWidth * 1.02;
+    const extraTop = this.isMobileDevice ? (isPortrait ? 88 : 58) : 26;
+    const extraBottom = this.isMobileDevice ? (isPortrait ? 12 : 8) : 6;
     const left = this.safeInsetLeft;
     const right = this.safeInsetRight;
     const top = this.safeInsetTop + extraTop;
@@ -422,6 +423,51 @@ class PuzzleScene extends Phaser.Scene {
     return Phaser.Math.Clamp(size, minTileSize, MAX_TILE_SIZE);
   }
 
+  private computeMobilePortraitPlayerFocusTileSize(
+    viewportWidth: number,
+    viewportHeight: number,
+    players: GameState['players'],
+    baseTileSize: number,
+  ): number {
+    if (!this.isMobileDevice || players.length === 0) {
+      return baseTileSize;
+    }
+
+    // In portrait, prioritize keeping players in frame over fitting the full map.
+    if (viewportHeight <= viewportWidth * 1.05) {
+      return baseTileSize;
+    }
+
+    const minPlayerX = Math.min(...players.map((player) => player.x));
+    const maxPlayerX = Math.max(...players.map((player) => player.x));
+    const minPlayerY = Math.min(...players.map((player) => player.y));
+    const maxPlayerY = Math.max(...players.map((player) => player.y));
+    const spanX = maxPlayerX - minPlayerX + 1;
+    const spanY = maxPlayerY - minPlayerY + 1;
+
+    const widthBudget = viewportWidth * 0.92;
+    const heightBudget = viewportHeight * 0.8;
+    const paddingCellsX = 3.4;
+    const paddingCellsY = 4.2;
+    const fitFromPlayers = Math.floor(
+      Math.min(
+        widthBudget / Math.max(1, spanX + paddingCellsX),
+        heightBudget / Math.max(1, spanY + paddingCellsY),
+      ),
+    );
+
+    if (!Number.isFinite(fitFromPlayers) || fitFromPlayers <= 0) {
+      return baseTileSize;
+    }
+
+    const zoomCap = Math.max(baseTileSize, Math.floor(baseTileSize * 2.35));
+    return Phaser.Math.Clamp(
+      Math.max(baseTileSize, fitFromPlayers),
+      MOBILE_MIN_TILE_SIZE,
+      Math.min(MAX_TILE_SIZE, zoomCap),
+    );
+  }
+
   private renderSnapshot(
     snapshot: ControllerSnapshot,
     viewportWidth: number,
@@ -434,7 +480,13 @@ class PuzzleScene extends Phaser.Scene {
     const levelHeight = state.grid.length;
     const levelWidth = state.grid[0]?.length ?? 0;
     const viewport = this.getPlayableViewport(viewportWidth, viewportHeight);
-    const tileSize = this.computeTileSize(viewport.width, viewport.height, levelWidth, levelHeight);
+    const baseTileSize = this.computeTileSize(viewport.width, viewport.height, levelWidth, levelHeight);
+    const tileSize = this.computeMobilePortraitPlayerFocusTileSize(
+      viewport.width,
+      viewport.height,
+      state.players,
+      baseTileSize,
+    );
 
     const boardWidth = levelWidth * tileSize;
     const boardHeight = levelHeight * tileSize;
@@ -458,8 +510,9 @@ class PuzzleScene extends Phaser.Scene {
       const minPlayerCenterY = Math.min(...playerCentersY);
       const maxPlayerCenterY = Math.max(...playerCentersY);
 
-      const playerMarginX = Math.max(12, tileSize * 0.9);
-      const playerMarginY = Math.max(16, tileSize * 1.05);
+      const isPortrait = viewport.height > viewport.width * 1.05;
+      const playerMarginX = isPortrait ? Math.max(8, tileSize * 0.55) : Math.max(12, tileSize * 0.9);
+      const playerMarginY = isPortrait ? Math.max(10, tileSize * 0.7) : Math.max(16, tileSize * 1.05);
 
       const minOffsetX = viewport.left + playerMarginX - minPlayerCenterX;
       const maxOffsetX = viewport.left + viewport.width - playerMarginX - maxPlayerCenterX;
@@ -629,17 +682,18 @@ class PuzzleScene extends Phaser.Scene {
     }
 
     const isPaused = snapshot.screen === 'paused';
-    const hudInsetX = this.isMobileDevice ? 20 : 12;
-    const hudInsetY = this.isMobileDevice ? 18 : 10;
+    const hudInsetX = this.isMobileDevice ? 24 : 12;
+    const hudInsetY = this.isMobileDevice ? 52 : 10;
     const hudX = hudInsetX + this.safeInsetLeft;
     const hudY = hudInsetY + this.safeInsetTop;
     this.hudText.setPosition(hudX, hudY);
+    const reservedRightInset = this.isMobileDevice ? 122 : hudInsetX;
     this.hudText.setWordWrapWidth(
-      Math.max(140, viewportWidth - this.safeInsetLeft - this.safeInsetRight - hudInsetX * 2),
+      Math.max(118, viewportWidth - this.safeInsetLeft - this.safeInsetRight - hudInsetX - reservedRightInset),
     );
     if (this.isMobileDevice) {
       const levelName = state.levelId.length > 20 ? `${state.levelId.slice(0, 19)}…` : state.levelId;
-      this.hudText.setFontSize('12px');
+      this.hudText.setFontSize('11px');
       this.hudText.setText(
         `L${state.levelIndex + 1}/${state.levelIds.length} • M${state.moves} • P${state.players.length}/${state.totalPlayers}${isPaused ? ' • PAUSED' : ''}\n${levelName}`,
       );
@@ -1107,8 +1161,8 @@ class PuzzleScene extends Phaser.Scene {
   }
 
   private updateFpsLabel(snapshot: ControllerSnapshot, viewportWidth: number, time: number): void {
-    const insetX = this.isMobileDevice ? 20 : 12;
-    const insetY = this.isMobileDevice ? 18 : 10;
+    const insetX = this.isMobileDevice ? 16 : 12;
+    const insetY = this.isMobileDevice ? 52 : 10;
     this.fpsText.setPosition(viewportWidth - insetX - this.safeInsetRight, insetY + this.safeInsetTop);
     if (!snapshot.settings.showFps) {
       this.fpsText.setVisible(false);
