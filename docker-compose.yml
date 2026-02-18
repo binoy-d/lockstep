@@ -4,11 +4,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
+      NODE_ENV: production
       PORT: "8787"
       DB_PATH: /app/data/puzzle.sqlite
-      ADMIN_PASSWORD: "dick"
-      PUBLIC_ORIGIN: "https://lockstep.binoy.co"
-      API_SESSION_SECRET: "b7f2cc6b0e634a9ca3f0583f4e9cd8842a34f2183d9cf4b947f0f9d0e11fe7a3"
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PLAYER_NAME: ${ADMIN_PLAYER_NAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-https://lockstep.binoy.co}
+      API_SESSION_SECRET: ${API_SESSION_SECRET:?API_SESSION_SECRET must be set via environment/.env}
     ports:
       - "127.0.0.1:8787:8787"
     volumes:

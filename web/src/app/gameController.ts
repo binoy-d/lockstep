@@ -1,6 +1,7 @@
 import { createInitialState, restartLevel, setLevel, update } from '../core';
 import type { Direction, GameState, ParsedLevel } from '../core';
 import { submitScore } from '../runtime/backendApi';
+import type { LevelScoreRecord } from '../runtime/backendApi';
 import { saveSettings, type GameSettings } from '../runtime/settingsStorage';
 import {
   detectEnemyImpact,
@@ -94,6 +95,14 @@ export interface LevelClearSummarySnapshot {
   nextLevelIndex: number | null;
 }
 
+export interface ScoreSubmissionSnapshot {
+  sequence: number;
+  levelId: string;
+  moves: number;
+  durationMs: number;
+  scores: LevelScoreRecord[];
+}
+
 interface PendingLevelAdvance {
   nextState: GameState;
   transition: Omit<WinTransitionSnapshot, 'sequence' | 'startedAtMs' | 'durationMs'> | null;
@@ -110,6 +119,7 @@ export interface ControllerSnapshot {
   deathAnimation: DeathAnimationSnapshot | null;
   winTransition: WinTransitionSnapshot | null;
   levelClearSummary: LevelClearSummarySnapshot | null;
+  latestSubmittedScore: ScoreSubmissionSnapshot | null;
 }
 
 type Subscriber = (snapshot: ControllerSnapshot) => void;
@@ -159,6 +169,10 @@ export class GameController {
 
   private readonly pendingScoreSubmissions = new Set<Promise<void>>();
 
+  private latestSubmittedScore: ScoreSubmissionSnapshot | null = null;
+
+  private scoreSubmissionSequence = 0;
+
   public constructor(levels: ParsedLevel[], settings: GameSettings) {
     if (levels.length === 0) {
       throw new Error('Cannot initialize controller without levels.');
@@ -189,6 +203,7 @@ export class GameController {
       deathAnimation: this.deathAnimation,
       winTransition: this.winTransition,
       levelClearSummary: this.levelClearSummary,
+      latestSubmittedScore: this.latestSubmittedScore,
     };
   }
 
@@ -734,13 +749,22 @@ export class GameController {
     }
 
     try {
-      await submitScore({
+      const scores = await submitScore({
         levelId,
         playerName: this.playerName,
         moves,
         durationMs,
         replay,
       });
+      this.scoreSubmissionSequence += 1;
+      this.latestSubmittedScore = {
+        sequence: this.scoreSubmissionSequence,
+        levelId,
+        moves,
+        durationMs,
+        scores,
+      };
+      this.emit();
     } catch {
       // Non-fatal: keep gameplay responsive if backend is unavailable.
     }

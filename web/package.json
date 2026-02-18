@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
+    "coverage:relevant": "vitest run --config vitest.coverage-relevant.config.ts",
     "format": "prettier --write ."
   },
   "devDependencies": {

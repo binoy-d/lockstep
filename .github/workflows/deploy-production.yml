@@ -19,8 +19,66 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-web:
+    name: Verify web app
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  verify-backend:
+    name: Verify backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax Check
+        run: npm run check
+
+      - name: Test
+        run: npm run test
+
   deploy:
     name: Deploy lockstep.binoy.co
+    needs:
+      - verify-web
+      - verify-backend
     runs-on:
       - self-hosted
       - lockstep
@@ -28,8 +86,16 @@ jobs:
 
     steps:
       - name: Deploy on self-hosted runner
+        env:
+          API_SESSION_SECRET: ${{ secrets.API_SESSION_SECRET }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          ADMIN_USERNAME: ${{ vars.ADMIN_USERNAME }}
+          ADMIN_PLAYER_NAME: ${{ vars.ADMIN_PLAYER_NAME }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
         run: |
           set -euo pipefail
+          : "${API_SESSION_SECRET:?Missing GitHub secret: API_SESSION_SECRET}"
+          : "${PUBLIC_ORIGIN:?Missing GitHub variable: PUBLIC_ORIGIN}"
           cd /home/daniel/dev/lockstep
           current_branch=$(git branch --show-current)
           if [ "$current_branch" != "main" ]; then
@@ -37,5 +103,10 @@ jobs:
           fi
           git fetch origin main
           git pull --ff-only origin main
-          docker-compose up -d --build
-          docker-compose ps
+          API_SESSION_SECRET="${API_SESSION_SECRET}" \
+          ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
+          ADMIN_USERNAME="${ADMIN_USERNAME:-admin}" \
+          ADMIN_PLAYER_NAME="${ADMIN_PLAYER_NAME:-admin}" \
+          PUBLIC_ORIGIN="${PUBLIC_ORIGIN}" \
+          docker compose up -d --build
+          docker compose ps

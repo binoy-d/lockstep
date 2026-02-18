@@ -26,6 +26,12 @@ npm run dev
 npm run test
 ```
 
+## Coverage
+
+```bash
+npm run coverage
+```
+
 ## API
 
 - `GET /api/health`
@@ -46,3 +52,17 @@ All requests/responses are JSON.
 ## Storage
 
 SQLite file at `backend/data/puzzle.sqlite` (configurable via `DB_PATH`).
+
+## Environment Variables
+
+- `PORT` (default: `8787`)
+- `DB_PATH` (default: `backend/data/puzzle.sqlite`)
+- `PUBLIC_ORIGIN` (default: `https://lockstep.binoy.co`)
+- `API_SESSION_SECRET`
+  - Required in production (`NODE_ENV=production`).
+  - If omitted outside production, a random runtime secret is generated.
+- `ADMIN_USERNAME` (optional, default: `admin`)
+- `ADMIN_PLAYER_NAME` (optional, default: `ADMIN_USERNAME`)
+- `ADMIN_PASSWORD` (optional)
+  - If set, backend ensures the admin account exists/updates credentials on startup.
+  - If empty, admin bootstrap is disabled.

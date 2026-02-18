@@ -1449,7 +1449,7 @@ select.level-select-control-input {
   }
 
   .level-select-score-panel {
-    min-height: 32vh;
+    display: none;
   }
 
   .level-clear-stats {

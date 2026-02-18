@@ -3,6 +3,11 @@
 # Node
 node_modules/
 
+# Environment files
+.env
+.env.*
+!.env.example
+
 # Web build/test artifacts
 web/dist/
 web/coverage/

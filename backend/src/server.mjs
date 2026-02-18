@@ -1,7 +1,15 @@
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { URL } from 'node:url';
-import { API_SESSION_SECRET, DEFAULT_PORT, DB_PATH, PUBLIC_ORIGIN } from './config.mjs';
+import {
+  ADMIN_PASSWORD,
+  ADMIN_PLAYER_NAME,
+  ADMIN_USERNAME,
+  API_SESSION_SECRET,
+  DEFAULT_PORT,
+  DB_PATH,
+  PUBLIC_ORIGIN,
+} from './config.mjs';
 import { getBuiltInLevel } from './builtInLevels.mjs';
 import { createDatabase } from './db.mjs';
 import { renderLevelPreviewPng } from './levelPreviewImage.mjs';
@@ -692,7 +700,11 @@ function ensureAdminAccount(username, password, playerName = username) {
   db.assignUnownedLevelsToUser(existing.id);
 }
 
-ensureAdminAccount('admin', 'yeahimthegoat', 'admin');
+if (ADMIN_PASSWORD) {
+  ensureAdminAccount(ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_PLAYER_NAME);
+} else {
+  console.warn('Admin bootstrap skipped (ADMIN_PASSWORD not set).');
+}
 
 server.listen(DEFAULT_PORT, () => {
   console.log(`Backend listening on http://localhost:${DEFAULT_PORT}`);

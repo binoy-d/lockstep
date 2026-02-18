@@ -16,6 +16,9 @@ Lockstep is a browser-first puzzle game where all players move together every tu
 From repo root:
 
 ```bash
+cp .env.example .env
+# then set API_SESSION_SECRET to a random value:
+# openssl rand -hex 32
 docker compose up --build
 ```
 
@@ -78,6 +81,27 @@ cd backend
 npm run test
 ```
 
+### Relevant-File Coverage (Automated Script)
+
+Run both backend and web relevant-file coverage from repo root:
+
+```bash
+./scripts/run-coverage.sh
+```
+
+Run coverage for one side only:
+
+```bash
+./scripts/run-coverage.sh backend
+./scripts/run-coverage.sh web
+```
+
+Notes:
+
+- Backend coverage command is `npm run coverage` in `backend/`.
+- Web relevant coverage command is `npm run coverage:relevant` in `web/`.
+- Web HTML coverage output is generated at `web/coverage/index.html`.
+
 ## Lint + Build
 
 ```bash
@@ -98,14 +122,26 @@ npm run build
 
 This repo uses a self-hosted runner (`lockstep` label) on `binoyserver`, so deploy runs do not consume paid GitHub-hosted minutes.
 
-Deploy steps:
+Deploy pipeline behavior:
 
-1. In GitHub, run workflow: `Actions -> deploy-production -> Run workflow`.
-2. The self-hosted runner executes on `/home/daniel/dev/lockstep`, pulls `main`, and runs:
-   - `docker-compose up -d --build`
+1. Every `main` push touching app/deploy files (or manual run) triggers `deploy-production`.
+2. The workflow runs `verify-web` (install, lint, test, build) and `verify-backend` (install, syntax check, test) on GitHub-hosted runners.
+3. Only after both pass, the self-hosted `deploy` job runs on `/home/daniel/dev/lockstep`.
+4. Deploy injects GitHub secrets/variables as process env, pulls `main`, and runs `docker compose up -d --build`.
 
-Safety guard:
-- The workflow job only runs when `github.event.repository.private == false`, so it is blocked if the repo ever becomes private.
+Required GitHub environment configuration (Environment: `production`):
+
+- `API_SESSION_SECRET` (secret, required; long random value, e.g. 64 hex chars)
+- `ADMIN_PASSWORD` (secret, optional; if empty, admin bootstrap is disabled)
+- `PUBLIC_ORIGIN` (variable, required; e.g. `https://lockstep.binoy.co`)
+- `ADMIN_USERNAME` (variable, optional, defaults to `admin`)
+- `ADMIN_PLAYER_NAME` (variable, optional, defaults to `admin`)
+
+Security notes:
+
+- No credentials should be committed in `docker-compose.yml` or source files.
+- `.env` files are git-ignored; keep secrets in GitHub secrets or secure local env files.
+- Backend enforces `API_SESSION_SECRET` in production mode.
 
 ## Levels
 

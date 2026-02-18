@@ -277,3 +277,89 @@ test('removes legacy level-one spoofed 3-move scores on startup', () => {
 
   rmSync(path, { force: true });
 });
+
+/**
+ * Ensures score ownership is persisted for authenticated users while guest scores remain nullable.
+ */
+test('preserves user-linked and guest score ownership metadata', () => {
+  const path = makeTempPath('score-ownership');
+  const db = createDatabase(path);
+  const user = db.createUser({
+    username: 'score_owner',
+    passwordHash: 'hash',
+    playerName: 'Owner',
+    isAdmin: false,
+  });
+
+  db.insertScore({
+    levelId: 'map0',
+    playerName: 'Owner',
+    userId: user.id,
+    moves: 6,
+    durationMs: 900,
+    replay: '6r',
+  });
+  db.insertScore({
+    levelId: 'map0',
+    playerName: 'Guest',
+    moves: 8,
+    durationMs: 1200,
+    replay: '8r',
+  });
+
+  const sqlite = new DatabaseSync(path);
+  const rows = sqlite
+    .prepare(`
+      SELECT player_name AS playerName, user_id AS userId
+      FROM level_scores
+      WHERE level_id = 'map0'
+      ORDER BY player_name ASC;
+    `)
+    .all();
+  sqlite.close();
+
+  const normalizedRows = rows.map((row) => ({ ...row }));
+  assert.deepEqual(normalizedRows, [
+    { playerName: 'Guest', userId: null },
+    { playerName: 'Owner', userId: user.id },
+  ]);
+
+  rmSync(path, { force: true });
+});
+
+/**
+ * Confirms score lookups are properly scoped by level id.
+ */
+test('keeps leaderboard results isolated by level id', () => {
+  const path = makeTempPath('score-level-scope');
+  const db = createDatabase(path);
+
+  db.insertScore({ levelId: 'map0', playerName: 'A', moves: 9, durationMs: 900 });
+  db.insertScore({ levelId: 'map0', playerName: 'B', moves: 7, durationMs: 1100 });
+  db.insertScore({ levelId: 'map1', playerName: 'C', moves: 3, durationMs: 700 });
+
+  const map0Scores = db.getTopScores('map0', 10);
+  const map1Scores = db.getTopScores('map1', 10);
+
+  assert.equal(map0Scores.length, 2);
+  assert.equal(map0Scores[0].playerName, 'B');
+  assert.equal(map1Scores.length, 1);
+  assert.equal(map1Scores[0].playerName, 'C');
+
+  rmSync(path, { force: true });
+});
+
+/**
+ * Documents invalid user-id behavior for publish-proof checks.
+ */
+test('returns false publish proof for non-integer user ids', () => {
+  const path = makeTempPath('publish-proof-invalid-user');
+  const db = createDatabase(path);
+
+  assert.equal(db.hasUserPublishProof('map0', null), false);
+  assert.equal(db.hasUserPublishProof('map0', undefined), false);
+  assert.equal(db.hasUserPublishProof('map0', 0), false);
+  assert.equal(db.hasUserPublishProof('map0', Number.NaN), false);
+
+  rmSync(path, { force: true });
+});

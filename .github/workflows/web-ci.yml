@@ -38,6 +38,9 @@ jobs:
       - name: Test
         run: npm run test
 
+      - name: Coverage (relevant files)
+        run: npm run coverage:relevant
+
       - name: Build
         run: npm run build
 
@@ -54,9 +57,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Syntax Check
         run: npm run check
 
       - name: Test
         run: npm run test
+
+      - name: Coverage (relevant files)
+        run: npm run coverage

@@ -331,6 +331,8 @@ export class OverlayUI {
 
   private lastRenderedLevelClearKey: string | null = null;
 
+  private lastHandledScoreSubmissionSequence = 0;
+
   private levelSelectCardButtons = new Map<number, HTMLButtonElement>();
 
   private levelSelectCardContainers = new Map<number, HTMLElement>();
@@ -1424,6 +1426,8 @@ export class OverlayUI {
       this.lastRenderedLevelClearKey = null;
     }
 
+    this.applyCompletedScoreSubmission(snapshot);
+
     const canPlay = snapshot.playerName.trim().length > 0;
     if (this.autoStartFromDeepLinkPending && snapshot.screen === 'intro' && canPlay) {
       this.autoStartFromDeepLinkPending = false;
@@ -2039,6 +2043,29 @@ export class OverlayUI {
       const score = scores[i];
       applyScore(this.scoreList, score, i);
       applyScore(this.hudScoreList, score, i);
+    }
+  }
+
+  private applyCompletedScoreSubmission(snapshot: ControllerSnapshot): void {
+    const submitted = snapshot.latestSubmittedScore;
+    if (!submitted) {
+      return;
+    }
+
+    if (submitted.sequence <= this.lastHandledScoreSubmissionSequence) {
+      return;
+    }
+
+    this.lastHandledScoreSubmissionSequence = submitted.sequence;
+    this.scoreCache.set(submitted.levelId, submitted.scores);
+
+    const selectedLevel = snapshot.levels[snapshot.selectedLevelIndex];
+    if (selectedLevel?.id === submitted.levelId) {
+      this.renderScores(submitted.levelId, submitted.scores);
+    }
+
+    if (snapshot.levelClearSummary?.levelId === submitted.levelId) {
+      this.renderLevelClearScores(submitted.levelId, submitted.scores);
     }
   }
 
