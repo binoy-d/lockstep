@@ -75,7 +75,7 @@ test('validates score payload constraints', () => {
     playerName: 'Binoy',
     moves: 22,
     durationMs: 45000,
-    replay: 'r'.repeat(22),
+    replay: '22r',
   });
 
   assert.equal(score.moves, 22);

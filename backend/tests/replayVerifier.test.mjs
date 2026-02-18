@@ -4,6 +4,7 @@ import { validateReplayInput, verifyReplayClearsLevel } from '../src/replayVerif
 
 test('normalizes replay input', () => {
   assert.equal(validateReplayInput('RDLU'), 'rdlu');
+  assert.equal(validateReplayInput('6d2r'), 'ddddddrr');
 });
 
 test('rejects replay input with invalid moves', () => {
@@ -19,4 +20,11 @@ test('accepts replay only when it clears the level', () => {
   const fail = verifyReplayClearsLevel(levelText, 'll');
   assert.equal(fail.ok, false);
   assert.equal(fail.moves, 2);
+});
+
+test('treats numeric path tiles as path markers, not enemy spawns', () => {
+  const levelText = ['#####', '#P2!#', '#####'].join('\n');
+  const clear = verifyReplayClearsLevel(levelText, '2r');
+  assert.equal(clear.ok, true);
+  assert.equal(clear.moves, 2);
 });

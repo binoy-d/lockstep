@@ -28,6 +28,31 @@ function directionToReplayMove(direction: Direction): string {
   }
 }
 
+function compressReplayMoves(rawReplay: string): string {
+  if (rawReplay.length <= 1) {
+    return rawReplay;
+  }
+
+  let output = '';
+  let runChar = rawReplay[0];
+  let runLength = 1;
+
+  for (let index = 1; index < rawReplay.length; index += 1) {
+    const move = rawReplay[index];
+    if (move === runChar) {
+      runLength += 1;
+      continue;
+    }
+
+    output += runLength > 1 ? `${runLength}${runChar}` : runChar;
+    runChar = move;
+    runLength = 1;
+  }
+
+  output += runLength > 1 ? `${runLength}${runChar}` : runChar;
+  return output;
+}
+
 export interface EnemyDeathAnimationSnapshot extends EnemyImpact {
   kind: 'enemy';
   sequence: number;
@@ -411,7 +436,7 @@ export class GameController {
     const completedLevelIndex = previous.levelIndex;
     const completedMoves = previous.moves + 1;
     this.currentRunReplay.push(directionToReplayMove(direction));
-    const replayForAttempt = this.currentRunReplay.join('');
+    const replayForAttempt = compressReplayMoves(this.currentRunReplay.join(''));
 
     const next = update(previous, { direction }, dtMs);
     if (next.lastEvent === 'level-reset') {

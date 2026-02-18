@@ -45,8 +45,7 @@ function parseLevelGrid(levelText) {
         continue;
       }
 
-      const numeric = Number.parseInt(tile, 10);
-      if (Number.isInteger(numeric)) {
+      if (tile === '1') {
         enemies.push({ id: enemies.length, x, y });
       }
     }
@@ -179,15 +178,38 @@ export function validateReplayInput(input) {
     throw new Error('Replay must be a string.');
   }
 
-  const replay = input.trim().toLowerCase();
-  if (replay.length === 0) {
+  const rawReplay = input.trim().toLowerCase();
+  if (rawReplay.length === 0) {
     throw new Error('Replay cannot be empty.');
   }
-  if (replay.length > REPLAY_MAX_MOVES) {
-    throw new Error(`Replay cannot exceed ${REPLAY_MAX_MOVES} moves.`);
+
+  let replay = '';
+  let consumed = 0;
+  const tokenRe = /(\d*)([udlr])/g;
+
+  for (let token = tokenRe.exec(rawReplay); token; token = tokenRe.exec(rawReplay)) {
+    if (token.index !== consumed) {
+      throw new Error('Replay must use only U, D, L, R moves, with optional counts like 6d.');
+    }
+    consumed = tokenRe.lastIndex;
+
+    const runLengthText = token[1];
+    const direction = token[2];
+    const runLength = runLengthText.length === 0 ? 1 : Number.parseInt(runLengthText, 10);
+
+    if (!Number.isInteger(runLength) || runLength <= 0) {
+      throw new Error('Replay run length must be a positive integer.');
+    }
+
+    if (replay.length + runLength > REPLAY_MAX_MOVES) {
+      throw new Error(`Replay cannot exceed ${REPLAY_MAX_MOVES} moves.`);
+    }
+
+    replay += direction.repeat(runLength);
   }
-  if (!/^[udlr]+$/.test(replay)) {
-    throw new Error('Replay must use only U, D, L, R moves.');
+
+  if (consumed !== rawReplay.length || replay.length === 0) {
+    throw new Error('Replay must use only U, D, L, R moves, with optional counts like 6d.');
   }
 
   return replay;
