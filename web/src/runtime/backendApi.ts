@@ -260,6 +260,7 @@ export async function submitScore(input: {
   playerName: string;
   moves: number;
   durationMs: number;
+  replay: string;
 }): Promise<LevelScoreRecord[]> {
   const payload = await requestJson<{ levelId: string; scores: LevelScoreRecord[] }>('/scores', {
     method: 'POST',

@@ -10,10 +10,23 @@ import {
   type LavaImpact,
 } from './deathImpact';
 
-export type Screen = 'intro' | 'main' | 'level-select' | 'settings' | 'editor' | 'playing' | 'paused';
+export type Screen = 'intro' | 'main' | 'level-select' | 'settings' | 'editor' | 'playing' | 'paused' | 'level-clear';
 
 const DEATH_ANIMATION_MS = 620;
 const WIN_TRANSITION_MS = 980;
+
+function directionToReplayMove(direction: Direction): string {
+  switch (direction) {
+    case 'up':
+      return 'u';
+    case 'down':
+      return 'd';
+    case 'left':
+      return 'l';
+    case 'right':
+      return 'r';
+  }
+}
 
 export interface EnemyDeathAnimationSnapshot extends EnemyImpact {
   kind: 'enemy';
@@ -47,6 +60,20 @@ export interface WinTransitionSnapshot {
   playerId: number;
 }
 
+export interface LevelClearSummarySnapshot {
+  levelId: string;
+  levelIndex: number;
+  moves: number;
+  durationMs: number;
+  isFinalLevel: boolean;
+  nextLevelIndex: number | null;
+}
+
+interface PendingLevelAdvance {
+  nextState: GameState;
+  transition: Omit<WinTransitionSnapshot, 'sequence' | 'startedAtMs' | 'durationMs'> | null;
+}
+
 export interface ControllerSnapshot {
   screen: Screen;
   gameState: GameState;
@@ -57,6 +84,7 @@ export interface ControllerSnapshot {
   statusMessage: string | null;
   deathAnimation: DeathAnimationSnapshot | null;
   winTransition: WinTransitionSnapshot | null;
+  levelClearSummary: LevelClearSummarySnapshot | null;
 }
 
 type Subscriber = (snapshot: ControllerSnapshot) => void;
@@ -98,6 +126,12 @@ export class GameController {
 
   private winTransitionSequence = 0;
 
+  private levelClearSummary: LevelClearSummarySnapshot | null = null;
+
+  private pendingLevelAdvance: PendingLevelAdvance | null = null;
+
+  private currentRunReplay: string[] = [];
+
   private readonly pendingScoreSubmissions = new Set<Promise<void>>();
 
   public constructor(levels: ParsedLevel[], settings: GameSettings) {
@@ -129,6 +163,7 @@ export class GameController {
       statusMessage: this.statusMessage,
       deathAnimation: this.deathAnimation,
       winTransition: this.winTransition,
+      levelClearSummary: this.levelClearSummary,
     };
   }
 
@@ -149,6 +184,8 @@ export class GameController {
     this.screen = 'playing';
     this.statusMessage = null;
     this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.clearLevelClearState();
     this.levelStartedAtMs = Date.now();
     this.clearTransientEffects();
     this.emit();
@@ -157,6 +194,8 @@ export class GameController {
   public openMainMenu(): void {
     this.screen = 'intro';
     this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.clearLevelClearState();
     this.clearTransientEffects();
     this.emit();
   }
@@ -173,6 +212,8 @@ export class GameController {
   public openEditor(): void {
     this.screen = 'editor';
     this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.clearLevelClearState();
     this.clearTransientEffects();
     this.emit();
   }
@@ -257,8 +298,69 @@ export class GameController {
     this.screen = 'playing';
     this.statusMessage = null;
     this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.clearLevelClearState();
     this.levelStartedAtMs = Date.now();
     this.clearTransientEffects();
+    this.emit();
+  }
+
+  public replayClearedLevel(): void {
+    if (this.screen !== 'level-clear' || !this.levelClearSummary) {
+      return;
+    }
+
+    const levelIndex = this.levelClearSummary.levelIndex;
+    this.selectedLevelIndex = levelIndex;
+    this.gameState = setLevel(this.gameState, levelIndex);
+    this.screen = 'playing';
+    this.statusMessage = null;
+    this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.levelStartedAtMs = Date.now();
+    this.clearLevelClearState();
+    this.clearTransientEffects();
+    this.emit();
+  }
+
+  public continueAfterLevelClear(): void {
+    if (this.screen !== 'level-clear' || !this.levelClearSummary) {
+      return;
+    }
+
+    const summary = this.levelClearSummary;
+    if (summary.isFinalLevel || !this.pendingLevelAdvance) {
+      this.screen = 'main';
+      this.statusMessage = `All levels complete. Final clear: ${summary.moves} moves in ${(summary.durationMs / 1000).toFixed(1)}s.`;
+      this.selectedLevelIndex = summary.levelIndex;
+      this.inputQueue.length = 0;
+      this.currentRunReplay = [];
+      this.clearLevelClearState();
+      this.clearTransientEffects();
+      this.emit();
+      return;
+    }
+
+    const nowMs = Date.now();
+    const pendingAdvance = this.pendingLevelAdvance;
+    this.gameState = pendingAdvance.nextState;
+    this.selectedLevelIndex = pendingAdvance.nextState.levelIndex;
+    this.screen = 'playing';
+    this.statusMessage = null;
+    this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.levelStartedAtMs = nowMs;
+    this.clearLevelClearState();
+    this.clearTransientEffects();
+    if (pendingAdvance.transition) {
+      this.winTransitionSequence += 1;
+      this.winTransition = {
+        ...pendingAdvance.transition,
+        sequence: this.winTransitionSequence,
+        startedAtMs: nowMs,
+        durationMs: WIN_TRANSITION_MS,
+      };
+    }
     this.emit();
   }
 
@@ -292,6 +394,7 @@ export class GameController {
       if (nowMs >= this.pendingResetDeadlineMs) {
         this.gameState = this.pendingResetState;
         this.levelStartedAtMs = nowMs;
+        this.currentRunReplay = [];
         this.clearTransientEffects();
         this.emit();
       }
@@ -305,7 +408,10 @@ export class GameController {
 
     const previous = this.gameState;
     const completedLevelId = previous.levelId;
+    const completedLevelIndex = previous.levelIndex;
     const completedMoves = previous.moves + 1;
+    this.currentRunReplay.push(directionToReplayMove(direction));
+    const replayForAttempt = this.currentRunReplay.join('');
 
     const next = update(previous, { direction }, dtMs);
     if (next.lastEvent === 'level-reset') {
@@ -332,12 +438,12 @@ export class GameController {
       }
     }
 
-    this.gameState = next;
     this.deathAnimation = null;
 
     if (next.lastEvent === 'level-advanced') {
       const durationMs = Math.max(0, nowMs - this.levelStartedAtMs);
       const finishImpact = detectGoalFinishImpact(previous, direction);
+      let pendingTransition: PendingLevelAdvance['transition'] = null;
       const sourceLevel = previous.levels[previous.levelId];
       if (sourceLevel) {
         const fallbackPortal =
@@ -347,11 +453,7 @@ export class GameController {
 
         const portal = finishImpact?.portal ?? (fallbackPortal ? { x: fallbackPortal.x, y: fallbackPortal.y } : null);
         if (portal) {
-          this.winTransitionSequence += 1;
-          this.winTransition = {
-            sequence: this.winTransitionSequence,
-            startedAtMs: nowMs,
-            durationMs: WIN_TRANSITION_MS,
+          pendingTransition = {
             completedMoves,
             completedDurationMs: durationMs,
             sourceLevelId: previous.levelId,
@@ -363,24 +465,54 @@ export class GameController {
         }
       }
 
-      this.selectedLevelIndex = next.levelIndex;
+      this.pendingLevelAdvance = {
+        nextState: next,
+        transition: pendingTransition,
+      };
+      this.levelClearSummary = {
+        levelId: completedLevelId,
+        levelIndex: completedLevelIndex,
+        moves: completedMoves,
+        durationMs,
+        isFinalLevel: false,
+        nextLevelIndex: next.levelIndex,
+      };
+      this.screen = 'level-clear';
       this.statusMessage = `Level clear: ${completedMoves} moves in ${(durationMs / 1000).toFixed(1)}s.`;
-      this.levelStartedAtMs = nowMs;
-      this.queueScoreSubmission(completedLevelId, completedMoves, durationMs);
-    } else if (next.lastEvent === 'level-reset') {
-      this.levelStartedAtMs = nowMs;
+      this.inputQueue.length = 0;
+      this.currentRunReplay = [];
+      this.gameState = previous;
+      this.queueScoreSubmission(completedLevelId, completedMoves, durationMs, replayForAttempt);
+      this.emit();
+      return;
     }
 
     if (next.status === 'game-complete') {
-      const finalMoves = next.lastEvent === 'game-complete' ? next.moves : completedMoves;
+      const finalMoves = next.moves;
       const durationMs = Math.max(0, nowMs - this.levelStartedAtMs);
-      this.queueScoreSubmission(completedLevelId, finalMoves, durationMs);
-      this.screen = 'main';
+      this.pendingLevelAdvance = null;
+      this.levelClearSummary = {
+        levelId: completedLevelId,
+        levelIndex: completedLevelIndex,
+        moves: finalMoves,
+        durationMs,
+        isFinalLevel: true,
+        nextLevelIndex: null,
+      };
+      this.screen = 'level-clear';
       this.statusMessage = `All levels complete. Final clear: ${finalMoves} moves in ${(durationMs / 1000).toFixed(1)}s.`;
-      this.selectedLevelIndex = this.levels.length - 1;
       this.inputQueue.length = 0;
+      this.currentRunReplay = [];
+      this.gameState = previous;
+      this.queueScoreSubmission(completedLevelId, finalMoves, durationMs, replayForAttempt);
+      this.emit();
+      return;
+    }
+
+    this.gameState = next;
+    if (next.lastEvent === 'level-reset') {
       this.levelStartedAtMs = nowMs;
-      this.clearTransientEffects();
+      this.currentRunReplay = [];
     }
 
     this.emit();
@@ -422,6 +554,8 @@ export class GameController {
     this.gameState = createInitialState(this.levels, levelIndex);
     this.statusMessage = `Saved level ${level.id}`;
     this.levelStartedAtMs = Date.now();
+    this.currentRunReplay = [];
+    this.clearLevelClearState();
     this.clearTransientEffects();
     this.emit();
     return levelIndex;
@@ -451,6 +585,8 @@ export class GameController {
     this.statusMessage = `Deleted level ${levelId}`;
     this.levelStartedAtMs = Date.now();
     this.inputQueue.length = 0;
+    this.currentRunReplay = [];
+    this.clearLevelClearState();
     this.clearTransientEffects();
     this.emit();
     return true;
@@ -532,6 +668,11 @@ export class GameController {
     this.winTransition = null;
   }
 
+  private clearLevelClearState(): void {
+    this.levelClearSummary = null;
+    this.pendingLevelAdvance = null;
+  }
+
   private queueDeathReset(
     pendingResetState: GameState,
     nowMs: number,
@@ -549,10 +690,11 @@ export class GameController {
       durationMs: DEATH_ANIMATION_MS,
     };
     this.inputQueue.length = 0;
+    this.currentRunReplay = [];
   }
 
-  private queueScoreSubmission(levelId: string, moves: number, durationMs: number): void {
-    const task = this.submitCompletedScore(levelId, moves, durationMs).catch(() => {
+  private queueScoreSubmission(levelId: string, moves: number, durationMs: number, replay: string): void {
+    const task = this.submitCompletedScore(levelId, moves, durationMs, replay).catch(() => {
       // Non-fatal.
     });
     this.pendingScoreSubmissions.add(task);
@@ -561,7 +703,7 @@ export class GameController {
     });
   }
 
-  private async submitCompletedScore(levelId: string, moves: number, durationMs: number): Promise<void> {
+  private async submitCompletedScore(levelId: string, moves: number, durationMs: number, replay: string): Promise<void> {
     if (!this.playerName) {
       return;
     }
@@ -572,6 +714,7 @@ export class GameController {
         playerName: this.playerName,
         moves,
         durationMs,
+        replay,
       });
     } catch {
       // Non-fatal: keep gameplay responsive if backend is unavailable.

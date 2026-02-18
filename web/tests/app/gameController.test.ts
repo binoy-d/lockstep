@@ -97,7 +97,7 @@ describe('game controller', () => {
     expect(controller.getSnapshot().screen).toBe('playing');
   });
 
-  it('emits a win transition anchored to the final goal portal when advancing levels', () => {
+  it('shows a level-clear screen, then emits win transition after continue', () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = 3000;
     nowSpy.mockImplementation(() => now);
@@ -116,9 +116,21 @@ describe('game controller', () => {
       controller.fixedUpdate(16.67);
 
       const snapshot = controller.getSnapshot();
-      expect(snapshot.gameState.levelId).toBe('map1');
-      expect(snapshot.gameState.lastEvent).toBe('level-advanced');
-      expect(snapshot.winTransition).toMatchObject({
+      expect(snapshot.screen).toBe('level-clear');
+      expect(snapshot.levelClearSummary).toMatchObject({
+        levelId: 'map0',
+        moves: 1,
+        isFinalLevel: false,
+      });
+      expect(snapshot.winTransition).toBeNull();
+      expect(snapshot.gameState.levelId).toBe('map0');
+
+      controller.continueAfterLevelClear();
+      const continued = controller.getSnapshot();
+      expect(continued.screen).toBe('playing');
+      expect(continued.gameState.levelId).toBe('map1');
+      expect(continued.levelClearSummary).toBeNull();
+      expect(continued.winTransition).toMatchObject({
         sourceLevelId: 'map0',
         sourceLevelWidth: 5,
         sourceLevelHeight: 3,
@@ -126,7 +138,7 @@ describe('game controller', () => {
         playerId: 0,
       });
 
-      now += (snapshot.winTransition?.durationMs ?? 0) + 1;
+      now += (continued.winTransition?.durationMs ?? 0) + 1;
       controller.queueDirection('right');
       controller.fixedUpdate(16.67);
       expect(controller.getSnapshot().winTransition).toBeNull();
@@ -164,6 +176,34 @@ describe('game controller', () => {
 
     controller.closeLevelSelect();
     expect(controller.getSnapshot().screen).toBe('paused');
+  });
+
+  it('shows final clear summary and returns to main on continue', () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    nowSpy.mockReturnValue(5000);
+
+    try {
+      const levels = [parseLevelText('map0', ['#####', '#P!##', '#####'].join('\n'))];
+      const controller = new GameController(levels, makeSettings());
+
+      controller.finishIntro();
+      controller.setPlayerName('Ava');
+      controller.startSelectedLevel();
+      controller.queueDirection('right');
+      controller.fixedUpdate(16.67);
+
+      const cleared = controller.getSnapshot();
+      expect(cleared.screen).toBe('level-clear');
+      expect(cleared.levelClearSummary?.isFinalLevel).toBe(true);
+      expect(cleared.levelClearSummary?.moves).toBe(1);
+
+      controller.continueAfterLevelClear();
+      const finished = controller.getSnapshot();
+      expect(finished.screen).toBe('main');
+      expect(finished.levelClearSummary).toBeNull();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('shows enemy death animation before applying level reset', () => {

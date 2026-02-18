@@ -426,29 +426,6 @@ function drawLevelMiniMap(buffer, grid) {
   const frameY = 84;
   const frameWidth = 500;
   const frameHeight = 500;
-  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, frameX, frameY, frameWidth, 1, [91, 200, 255, 160]);
-  fillRectBlend(
-    buffer,
-    PREVIEW_WIDTH,
-    PREVIEW_HEIGHT,
-    frameX,
-    frameY + frameHeight - 1,
-    frameWidth,
-    1,
-    [91, 200, 255, 140],
-  );
-  fillRectBlend(buffer, PREVIEW_WIDTH, PREVIEW_HEIGHT, frameX, frameY, 1, frameHeight, [91, 200, 255, 140]);
-  fillRectBlend(
-    buffer,
-    PREVIEW_WIDTH,
-    PREVIEW_HEIGHT,
-    frameX + frameWidth - 1,
-    frameY,
-    1,
-    frameHeight,
-    [91, 200, 255, 140],
-  );
-
   const padding = 8;
   const tileAreaX = frameX + padding;
   const tileAreaY = frameY + padding;
@@ -558,16 +535,18 @@ function drawAccentPanel(buffer, levelName, levelId) {
 
 export function renderLevelPreviewPng(level) {
   const pixels = Buffer.alloc(PREVIEW_WIDTH * PREVIEW_HEIGHT * 4);
-  fillVerticalGradient(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, [6, 22, 44], [8, 10, 24]);
-  drawRadialGlow(pixels, 780, 320, 500, [84, 212, 206], 0.34);
-  drawRadialGlow(pixels, 320, 120, 360, [35, 102, 188], 0.22);
-  drawRadialGlow(pixels, 1170, 590, 260, [95, 220, 190], 0.2);
+  fillVerticalGradient(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, [3, 8, 20], [1, 2, 10]);
+  const minimapCenterX = 342;
+  const minimapCenterY = 334;
+  drawRadialGlow(pixels, minimapCenterX, minimapCenterY, 1020, [36, 104, 176], 0.46);
+  drawRadialGlow(pixels, minimapCenterX, minimapCenterY, 760, [52, 150, 168], 0.3);
+  drawRadialGlow(pixels, minimapCenterX, minimapCenterY, 420, [64, 176, 198], 0.18);
 
   for (let x = 0; x < PREVIEW_WIDTH; x += 88) {
-    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, x, 0, 1, PREVIEW_HEIGHT, [60, 117, 165, 130]);
+    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, x, 0, 1, PREVIEW_HEIGHT, [72, 150, 210, 88]);
   }
   for (let y = 0; y < PREVIEW_HEIGHT; y += 84) {
-    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 0, y, PREVIEW_WIDTH, 1, [60, 117, 165, 118]);
+    fillRectBlend(pixels, PREVIEW_WIDTH, PREVIEW_HEIGHT, 0, y, PREVIEW_WIDTH, 1, [72, 150, 210, 82]);
   }
 
   const grid = parseGrid(level?.text);

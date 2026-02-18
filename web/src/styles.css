@@ -544,6 +544,60 @@ kbd {
   margin-bottom: 20px;
 }
 
+[data-panel='level-clear'] {
+  align-self: center;
+}
+
+.menu-panel-level-clear {
+  width: min(680px, calc(100vw - 30px));
+}
+
+.level-clear-level-name {
+  margin: 0 0 10px;
+  font-size: 22px;
+}
+
+.level-clear-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.level-clear-stat {
+  border: 1px solid rgba(120, 194, 231, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(155deg, rgba(8, 18, 30, 0.78), rgba(8, 30, 41, 0.64));
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.level-clear-stat span {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.level-clear-stat strong {
+  color: #ecf8ff;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.level-clear-scores-title {
+  margin: 4px 0 8px;
+}
+
+.level-clear-score-list {
+  max-height: 210px;
+}
+
+.level-clear-actions {
+  justify-content: flex-end;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
@@ -1396,6 +1450,10 @@ select.level-select-control-input {
 
   .level-select-score-panel {
     min-height: 32vh;
+  }
+
+  .level-clear-stats {
+    grid-template-columns: 1fr;
   }
 
   .editor-page-header {

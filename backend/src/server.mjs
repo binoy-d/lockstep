@@ -6,6 +6,7 @@ import { getBuiltInLevel } from './builtInLevels.mjs';
 import { createDatabase } from './db.mjs';
 import { renderLevelPreviewPng } from './levelPreviewImage.mjs';
 import { hashPassword, verifyPassword } from './passwords.mjs';
+import { verifyReplayClearsLevel } from './replayVerifier.mjs';
 import { issueSession, parseCookies, verifySessionToken } from './security.mjs';
 import {
   validateDeleteLevelPayload,
@@ -625,6 +626,23 @@ const server = createServer(async (req, res) => {
         }
 
         payload.playerName = user.playerName;
+      }
+
+      const isEditorTestLevel = payload.levelId.startsWith('__editor-test-level-');
+      if (!isEditorTestLevel) {
+        const levelRecord = resolveLevelForPreview(payload.levelId);
+        if (!levelRecord) {
+          sendJson(req, res, 404, { error: `Level ${payload.levelId} not found.` });
+          return;
+        }
+
+        const replayVerification = verifyReplayClearsLevel(levelRecord.text, payload.replay);
+        if (!replayVerification.ok) {
+          sendJson(req, res, 403, {
+            error: 'Score rejected: replay did not produce a valid clear.',
+          });
+          return;
+        }
       }
 
       db.insertScore({

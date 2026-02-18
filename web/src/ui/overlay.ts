@@ -247,6 +247,20 @@ export class OverlayUI {
 
   private readonly hudScoreStatus: HTMLElement;
 
+  private readonly levelClearLevelText: HTMLElement;
+
+  private readonly levelClearMovesText: HTMLElement;
+
+  private readonly levelClearTimeText: HTMLElement;
+
+  private readonly levelClearScoreList: HTMLOListElement;
+
+  private readonly levelClearScoreStatus: HTMLElement;
+
+  private readonly levelClearReplayButton: HTMLButtonElement;
+
+  private readonly levelClearContinueButton: HTMLButtonElement;
+
   private readonly editorIdInput: HTMLInputElement;
 
   private readonly editorNameInput: HTMLInputElement;
@@ -315,6 +329,8 @@ export class OverlayUI {
 
   private lastRenderedHudLevelId: string | null = null;
 
+  private lastRenderedLevelClearKey: string | null = null;
+
   private levelSelectCardButtons = new Map<number, HTMLButtonElement>();
 
   private levelSelectCardContainers = new Map<number, HTMLElement>();
@@ -346,6 +362,7 @@ export class OverlayUI {
       levelSelect: asElement<HTMLElement>(this.root, '[data-panel="level-select"]'),
       settings: asElement<HTMLElement>(this.root, '[data-panel="settings"]'),
       editor: asElement<HTMLElement>(this.root, '[data-panel="editor"]'),
+      levelClear: asElement<HTMLElement>(this.root, '[data-panel="level-clear"]'),
       pause: asElement<HTMLElement>(this.root, '[data-panel="pause"]'),
     };
 
@@ -407,6 +424,13 @@ export class OverlayUI {
     this.hudScoreboard = asElement<HTMLElement>(this.root, '#hud-scoreboard');
     this.hudScoreList = asElement<HTMLOListElement>(this.root, '#hud-score-list');
     this.hudScoreStatus = asElement<HTMLElement>(this.root, '#hud-score-status');
+    this.levelClearLevelText = asElement<HTMLElement>(this.root, '#level-clear-level');
+    this.levelClearMovesText = asElement<HTMLElement>(this.root, '#level-clear-moves');
+    this.levelClearTimeText = asElement<HTMLElement>(this.root, '#level-clear-time');
+    this.levelClearScoreList = asElement<HTMLOListElement>(this.root, '#level-clear-score-list');
+    this.levelClearScoreStatus = asElement<HTMLElement>(this.root, '#level-clear-score-status');
+    this.levelClearReplayButton = asElement<HTMLButtonElement>(this.root, '#btn-level-clear-replay');
+    this.levelClearContinueButton = asElement<HTMLButtonElement>(this.root, '#btn-level-clear-continue');
 
     this.editorNameInput = asElement<HTMLInputElement>(this.root, '#editor-level-name');
     this.editorIdInput = asElement<HTMLInputElement>(this.root, '#editor-level-id');
@@ -705,6 +729,28 @@ export class OverlayUI {
         </div>
       </section>
 
+      <section class="menu-panel menu-panel-level-clear" data-panel="level-clear" hidden>
+        <h2>Level Clear</h2>
+        <p class="level-clear-level-name"><strong id="level-clear-level">Level</strong></p>
+        <div class="level-clear-stats">
+          <div class="level-clear-stat">
+            <span>Moves</span>
+            <strong id="level-clear-moves">0</strong>
+          </div>
+          <div class="level-clear-stat">
+            <span>Time</span>
+            <strong id="level-clear-time">0.0s</strong>
+          </div>
+        </div>
+        <h3 class="level-clear-scores-title">High Scores</h3>
+        <div id="level-clear-score-status" class="score-status">Lower is better (moves, then time)</div>
+        <ol id="level-clear-score-list" class="score-list level-clear-score-list"></ol>
+        <div class="button-row level-clear-actions">
+          <button type="button" id="btn-level-clear-replay">Replay Level</button>
+          <button type="button" id="btn-level-clear-continue">Continue</button>
+        </div>
+      </section>
+
       <section class="menu-panel" data-panel="pause" hidden>
         <h2>Paused</h2>
         <p>Resume play or jump to another level.</p>
@@ -837,6 +883,14 @@ export class OverlayUI {
 
     asElement<HTMLButtonElement>(this.root, '#btn-restart').addEventListener('click', () => {
       this.controller.restartCurrentLevel();
+    });
+
+    this.levelClearReplayButton.addEventListener('click', () => {
+      this.controller.replayClearedLevel();
+    });
+
+    this.levelClearContinueButton.addEventListener('click', () => {
+      this.controller.continueAfterLevelClear();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-main-menu').addEventListener('click', () => {
@@ -1050,6 +1104,11 @@ export class OverlayUI {
       if (snapshot.screen === 'editor') {
         event.preventDefault();
         this.controller.openMainMenu();
+        return;
+      }
+
+      if (snapshot.screen === 'level-clear') {
+        event.preventDefault();
       }
     });
   }
@@ -1333,6 +1392,37 @@ export class OverlayUI {
       this.mainCurrentLevelText.textContent = label;
       this.levelSelectCurrentText.textContent = `${label} (${currentLevel.id})`;
     }
+    const levelClearSummary = snapshot.levelClearSummary;
+    if (levelClearSummary) {
+      const clearLevel = snapshot.levels[levelClearSummary.levelIndex];
+      const clearLabel = clearLevel
+        ? getLevelLabel(clearLevel.id, levelClearSummary.levelIndex, clearLevel.name)
+        : levelClearSummary.levelId;
+      this.levelClearLevelText.textContent = clearLabel;
+      this.levelClearMovesText.textContent = String(levelClearSummary.moves);
+      this.levelClearTimeText.textContent = `${(levelClearSummary.durationMs / 1000).toFixed(1)}s`;
+      this.levelClearContinueButton.textContent = levelClearSummary.isFinalLevel ? 'Finish' : 'Continue';
+      const levelClearKey = `${levelClearSummary.levelId}:${levelClearSummary.moves}:${levelClearSummary.durationMs}`;
+      if (this.lastRenderedLevelClearKey !== levelClearKey || screenChanged) {
+        this.lastRenderedLevelClearKey = levelClearKey;
+        void this.loadLevelClearScores(levelClearSummary.levelId, true);
+        window.setTimeout(() => {
+          const latest = this.lastSnapshot;
+          if (!latest || latest.screen !== 'level-clear' || latest.levelClearSummary?.levelId !== levelClearSummary.levelId) {
+            return;
+          }
+          void this.loadLevelClearScores(levelClearSummary.levelId, true);
+        }, 500);
+      }
+    } else {
+      this.levelClearLevelText.textContent = 'Level';
+      this.levelClearMovesText.textContent = '0';
+      this.levelClearTimeText.textContent = '0.0s';
+      this.levelClearContinueButton.textContent = 'Continue';
+      this.levelClearScoreStatus.textContent = 'Lower is better (moves, then time)';
+      this.levelClearScoreList.innerHTML = '';
+      this.lastRenderedLevelClearKey = null;
+    }
 
     const canPlay = snapshot.playerName.trim().length > 0;
     if (this.autoStartFromDeepLinkPending && snapshot.screen === 'intro' && canPlay) {
@@ -1360,6 +1450,7 @@ export class OverlayUI {
     this.panels.levelSelect.hidden = snapshot.screen !== 'level-select';
     this.panels.settings.hidden = snapshot.screen !== 'settings';
     this.panels.editor.hidden = snapshot.screen !== 'editor';
+    this.panels.levelClear.hidden = snapshot.screen !== 'level-clear';
     this.panels.pause.hidden = snapshot.screen !== 'paused';
     this.hudScoreboard.hidden = !(snapshot.screen === 'playing' || snapshot.screen === 'paused');
 
@@ -1407,6 +1498,10 @@ export class OverlayUI {
       }
     }
 
+    if (screenChanged && snapshot.screen === 'level-clear') {
+      this.levelClearContinueButton.focus();
+    }
+
     if (snapshot.screen === 'level-select') {
       void this.loadScoresForSelectedLevel(false);
     }
@@ -1428,10 +1523,12 @@ export class OverlayUI {
     this.root.classList.toggle('overlay-hidden', snapshot.screen === 'playing');
     this.root.classList.toggle('editor-screen-active', snapshot.screen === 'editor');
     this.root.classList.toggle('level-select-screen-active', snapshot.screen === 'level-select');
+    this.root.classList.toggle('level-clear-screen-active', snapshot.screen === 'level-clear');
     const gameShell = document.querySelector<HTMLElement>('#game-shell');
     if (gameShell) {
       gameShell.classList.toggle('editor-screen-active', snapshot.screen === 'editor');
       gameShell.classList.toggle('level-select-screen-active', snapshot.screen === 'level-select');
+      gameShell.classList.toggle('level-clear-screen-active', snapshot.screen === 'level-clear');
       gameShell.classList.remove('mobile-rotate-clockwise');
     }
     this.lastRenderedScreen = snapshot.screen;
@@ -1866,6 +1963,49 @@ export class OverlayUI {
       this.hudScoreStatus.textContent = `Scores unavailable: ${String(error)}`;
       this.scoreList.innerHTML = '';
       this.hudScoreList.innerHTML = '';
+    }
+  }
+
+  private async loadLevelClearScores(levelId: string, forceRefresh: boolean): Promise<void> {
+    if (!forceRefresh && this.scoreCache.has(levelId)) {
+      this.renderLevelClearScores(levelId, this.scoreCache.get(levelId) ?? []);
+      return;
+    }
+
+    this.levelClearScoreStatus.textContent = `Loading scores for ${levelId}...`;
+    this.levelClearScoreList.innerHTML = '';
+    try {
+      const scores = await fetchTopScores(levelId);
+      this.scoreCache.set(levelId, scores);
+
+      if (this.lastSnapshot?.levelClearSummary?.levelId !== levelId) {
+        return;
+      }
+
+      this.renderLevelClearScores(levelId, scores);
+    } catch (error) {
+      if (this.lastSnapshot?.levelClearSummary?.levelId !== levelId) {
+        return;
+      }
+
+      this.levelClearScoreStatus.textContent = `Scores unavailable: ${String(error)}`;
+      this.levelClearScoreList.innerHTML = '';
+    }
+  }
+
+  private renderLevelClearScores(levelId: string, scores: LevelScoreRecord[]): void {
+    this.levelClearScoreList.innerHTML = '';
+    if (scores.length === 0) {
+      this.levelClearScoreStatus.textContent = `${levelId}: no scores yet.`;
+      return;
+    }
+
+    this.levelClearScoreStatus.textContent = `${levelId}: top ${Math.min(scores.length, 10)} (lower moves, then lower time)`;
+    for (let i = 0; i < scores.length; i += 1) {
+      const score = scores[i];
+      const item = document.createElement('li');
+      item.textContent = `${i + 1}. ${score.playerName} - ${score.moves} moves - ${(score.durationMs / 1000).toFixed(1)}s`;
+      this.levelClearScoreList.append(item);
     }
   }
 

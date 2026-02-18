@@ -75,6 +75,7 @@ test('validates score payload constraints', () => {
     playerName: 'Binoy',
     moves: 22,
     durationMs: 45000,
+    replay: 'r'.repeat(22),
   });
 
   assert.equal(score.moves, 22);
@@ -87,6 +88,7 @@ test('validates score payload constraints', () => {
         playerName: 'X',
         moves: -1,
         durationMs: 10,
+        replay: '',
       }),
     /player name|moves/i,
   );
@@ -98,8 +100,21 @@ test('validates score payload constraints', () => {
         playerName: 'Binoy',
         moves: 10,
         durationMs: 20,
+        replay: 'r'.repeat(10),
       }),
     /duration is too low/i,
+  );
+
+  assert.throws(
+    () =>
+      validateScorePayload({
+        levelId: 'map1',
+        playerName: 'Binoy',
+        moves: 10,
+        durationMs: 5000,
+        replay: 'r'.repeat(9),
+      }),
+    /moves must match replay length/i,
   );
 });
 
