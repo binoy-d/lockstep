@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateReplayInput, verifyReplayClearsLevel } from '../src/replayVerifier.mjs';
+import { normalizeReplayForStorage, validateReplayInput, verifyReplayClearsLevel } from '../src/replayVerifier.mjs';
 
 test('normalizes replay input', () => {
   assert.equal(validateReplayInput('RDLU'), 'rdlu');
   assert.equal(validateReplayInput('6d2r'), 'ddddddrr');
+  assert.equal(normalizeReplayForStorage('dddddlllddddrrrrruurlrrrrrruurrlll'), '5d3l4d5r2url6r2u2r3l');
 });
 
 test('rejects replay input with invalid moves', () => {

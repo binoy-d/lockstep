@@ -81,6 +81,7 @@ export function createDatabase(dbPath) {
       user_id INTEGER,
       moves INTEGER NOT NULL,
       duration_ms INTEGER NOT NULL,
+      replay TEXT,
       created_at INTEGER NOT NULL
     );
 
@@ -109,6 +110,7 @@ export function createDatabase(dbPath) {
 
   maybeAddColumn(db, `ALTER TABLE user_levels ADD COLUMN owner_user_id INTEGER;`);
   maybeAddColumn(db, `ALTER TABLE level_scores ADD COLUMN user_id INTEGER;`);
+  maybeAddColumn(db, `ALTER TABLE level_scores ADD COLUMN replay TEXT;`);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_user_levels_owner
       ON user_levels(owner_user_id);
@@ -196,6 +198,11 @@ export function createDatabase(dbPath) {
     WHERE player_name = ?;
   `);
 
+  const deleteLevelOneThreeMoveScoresStmt = db.prepare(`
+    DELETE FROM level_scores
+    WHERE level_id = 'map0' AND moves = 3 AND replay IS NULL;
+  `);
+
   db.exec('BEGIN IMMEDIATE;');
   try {
     for (const row of distinctScoreNamesStmt.all()) {
@@ -254,6 +261,8 @@ export function createDatabase(dbPath) {
       takenIds.add(nextId);
     }
 
+    deleteLevelOneThreeMoveScoresStmt.run();
+
     db.exec('COMMIT;');
   } catch (error) {
     db.exec('ROLLBACK;');
@@ -302,8 +311,8 @@ export function createDatabase(dbPath) {
   `);
 
   const insertScoreStmt = db.prepare(`
-    INSERT INTO level_scores(level_id, player_name, user_id, moves, duration_ms, created_at)
-    VALUES(?, ?, ?, ?, ?, ?);
+    INSERT INTO level_scores(level_id, player_name, user_id, moves, duration_ms, replay, created_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?);
   `);
 
   const topScoresStmt = db.prepare(`
@@ -429,6 +438,7 @@ export function createDatabase(dbPath) {
         Number.isInteger(score.userId) ? score.userId : null,
         score.moves,
         score.durationMs,
+        typeof score.replay === 'string' ? score.replay : null,
         now,
       );
     },

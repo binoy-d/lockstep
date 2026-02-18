@@ -47,11 +47,12 @@ test('returns top 10 scores ordered by moves then duration then time', () => {
       playerName: `P${i}`,
       moves: i % 3 === 0 ? 10 : 12 + i,
       durationMs: 10000 + i,
+      replay: `${i + 1}r`,
     });
   }
 
-  db.insertScore({ levelId: 'map1', playerName: 'Fast', moves: 9, durationMs: 12000 });
-  db.insertScore({ levelId: 'map1', playerName: 'Slow', moves: 20, durationMs: 9000 });
+  db.insertScore({ levelId: 'map1', playerName: 'Fast', moves: 9, durationMs: 12000, replay: '9r' });
+  db.insertScore({ levelId: 'map1', playerName: 'Slow', moves: 20, durationMs: 9000, replay: '20r' });
 
   const top = db.getTopScores('map1', 10);
   assert.equal(top.length, 10);
@@ -65,6 +66,18 @@ test('returns top 10 scores ordered by moves then duration then time', () => {
     const currentRank = current.moves * 100000000 + current.durationMs;
     assert.ok(prevRank <= currentRank);
   }
+
+  const sqlite = new DatabaseSync(path);
+  const replayRow = sqlite
+    .prepare(`
+      SELECT replay
+      FROM level_scores
+      WHERE player_name = 'Fast'
+      LIMIT 1;
+    `)
+    .get();
+  sqlite.close();
+  assert.equal(replayRow.replay, '9r');
 
   rmSync(path, { force: true });
 });
@@ -225,6 +238,42 @@ test('normalizes legacy offensive player names on startup', () => {
   assert.equal(levels[0].authorName, 'Issac');
   assert.equal(scores[0].playerName, 'Issac');
   assert.equal(db.getTopScores(hardR, 10).length, 0);
+
+  rmSync(path, { force: true });
+});
+
+test('removes legacy level-one spoofed 3-move scores on startup', () => {
+  const path = makeTempPath('legacy-level-one-score-cleanup');
+  const sqlite = new DatabaseSync(path);
+  sqlite.exec(`
+    CREATE TABLE level_scores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level_id TEXT NOT NULL,
+      player_name TEXT NOT NULL,
+      moves INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+  `);
+
+  sqlite
+    .prepare(`
+      INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
+      VALUES (?, ?, ?, ?, ?);
+    `)
+    .run('map0', 'Spoofer', 3, 500, 1);
+  sqlite
+    .prepare(`
+      INSERT INTO level_scores(level_id, player_name, moves, duration_ms, created_at)
+      VALUES (?, ?, ?, ?, ?);
+    `)
+    .run('map0', 'Legit', 4, 1200, 2);
+  sqlite.close();
+
+  const db = createDatabase(path);
+  const scores = db.getTopScores('map0', 10);
+  assert.equal(scores.some((entry) => entry.moves === 3), false);
+  assert.equal(scores.some((entry) => entry.moves === 4), true);
 
   rmSync(path, { force: true });
 });

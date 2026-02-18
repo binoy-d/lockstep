@@ -80,6 +80,7 @@ test('validates score payload constraints', () => {
 
   assert.equal(score.moves, 22);
   assert.equal(score.durationMs, 45000);
+  assert.equal(score.replay, '22r');
 
   assert.throws(
     () =>

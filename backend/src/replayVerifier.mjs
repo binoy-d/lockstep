@@ -7,6 +7,31 @@ const DIRECTION_VECTORS = {
   r: { x: 1, y: 0 },
 };
 
+function compressReplay(replay) {
+  if (replay.length <= 1) {
+    return replay;
+  }
+
+  let output = '';
+  let runMove = replay[0];
+  let runLength = 1;
+
+  for (let index = 1; index < replay.length; index += 1) {
+    const move = replay[index];
+    if (move === runMove) {
+      runLength += 1;
+      continue;
+    }
+
+    output += runLength > 1 ? `${runLength}${runMove}` : runMove;
+    runMove = move;
+    runLength = 1;
+  }
+
+  output += runLength > 1 ? `${runLength}${runMove}` : runMove;
+  return output;
+}
+
 function parseLevelGrid(levelText) {
   if (typeof levelText !== 'string') {
     throw new Error('Level data is invalid.');
@@ -213,6 +238,10 @@ export function validateReplayInput(input) {
   }
 
   return replay;
+}
+
+export function normalizeReplayForStorage(input) {
+  return compressReplay(validateReplayInput(input));
 }
 
 export function verifyReplayClearsLevel(levelText, replayInput) {

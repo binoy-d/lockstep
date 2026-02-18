@@ -1,6 +1,6 @@
 import { Filter } from 'bad-words';
 import { createHash } from 'node:crypto';
-import { validateReplayInput } from './replayVerifier.mjs';
+import { normalizeReplayForStorage, validateReplayInput } from './replayVerifier.mjs';
 
 const LEVEL_ID_RE = /^[a-z0-9_-]{3,64}$/;
 const USERNAME_RE = /^[a-z0-9_]{3,24}$/;
@@ -233,7 +233,8 @@ export function validateScorePayload(input) {
 
   const levelId = validateLevelId(input.levelId);
   const playerName = validatePlayerName(input.playerName);
-  const replay = validateReplayInput(input.replay);
+  const replayExpanded = validateReplayInput(input.replay);
+  const replay = normalizeReplayForStorage(replayExpanded);
   const moves = Number.parseInt(String(input.moves), 10);
   const durationMs = Number.parseInt(String(input.durationMs), 10);
 
@@ -250,7 +251,7 @@ export function validateScorePayload(input) {
     throw new Error('Duration is too low for the submitted move count.');
   }
 
-  if (replay.length !== moves) {
+  if (replayExpanded.length !== moves) {
     throw new Error('Moves must match replay length.');
   }
 
