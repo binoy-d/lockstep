@@ -16,7 +16,7 @@ import {
 } from '../editor/levelEditorUtils';
 import {
   deleteCustomLevel,
-  fetchTopScores,
+  fetchScoresPage,
   fetchUserProgress,
   initializeApiSession,
   loginAccount,
@@ -26,12 +26,21 @@ import {
   saveUserProgress,
   type AuthState,
   type LevelScoreRecord,
+  type ScorePageRecord,
 } from '../runtime/backendApi';
 import { isTextInputFocused } from '../runtime/inputFocus';
 import { getLevelLabel, getLevelName } from '../runtime/levelMeta';
 import { LockstepIntroCinematic } from './introCinematic';
 
 const EDITOR_TEST_LEVEL_ID = '__editor-test-level';
+const SCORE_PAGE_SIZE = 10;
+
+interface ScoreQueryOptions {
+  scope: 'all' | 'personal';
+  searchText: string;
+  page: number;
+  pageSize: number;
+}
 
 function asElement<T extends HTMLElement>(root: ParentNode, selector: string): T {
   const element = root.querySelector(selector);
@@ -241,6 +250,16 @@ export class OverlayUI {
 
   private readonly scoreStatus: HTMLElement;
 
+  private readonly scoreSearchInput: HTMLInputElement;
+
+  private readonly scoreScopeSelect: HTMLSelectElement;
+
+  private readonly scorePagePrevButton: HTMLButtonElement;
+
+  private readonly scorePageNextButton: HTMLButtonElement;
+
+  private readonly scorePageText: HTMLElement;
+
   private readonly hudScoreboard: HTMLElement;
 
   private readonly hudScoreList: HTMLOListElement;
@@ -319,11 +338,22 @@ export class OverlayUI {
 
   private lastSnapshot: ControllerSnapshot | null = null;
 
-  private readonly scoreCache = new Map<string, LevelScoreRecord[]>();
+  private readonly scoreCache = new Map<string, ScorePageRecord>();
 
-  private scoreRequestNonce = 0;
+  private readonly inFlightScoreRequestMap = new Map<string, Promise<ScorePageRecord>>();
 
-  private inFlightScoreLevelId: string | null = null;
+  private scorePanelRequestNonce = 0;
+
+  private scorePanelQuery: ScoreQueryOptions = {
+    scope: 'all',
+    searchText: '',
+    page: 1,
+    pageSize: SCORE_PAGE_SIZE,
+  };
+
+  private scorePanelLastResult: ScorePageRecord | null = null;
+
+  private lastScorePanelLevelId: string | null = null;
 
   private lastRenderedScreen: ControllerSnapshot['screen'] | null = null;
 
@@ -423,6 +453,11 @@ export class OverlayUI {
     this.showFpsToggle = asElement<HTMLInputElement>(this.root, '#settings-show-fps');
     this.scoreList = asElement<HTMLOListElement>(this.root, '#score-list');
     this.scoreStatus = asElement<HTMLElement>(this.root, '#score-status');
+    this.scoreSearchInput = asElement<HTMLInputElement>(this.root, '#score-search-input');
+    this.scoreScopeSelect = asElement<HTMLSelectElement>(this.root, '#score-scope-select');
+    this.scorePagePrevButton = asElement<HTMLButtonElement>(this.root, '#btn-score-page-prev');
+    this.scorePageNextButton = asElement<HTMLButtonElement>(this.root, '#btn-score-page-next');
+    this.scorePageText = asElement<HTMLElement>(this.root, '#score-page-text');
     this.hudScoreboard = asElement<HTMLElement>(this.root, '#hud-scoreboard');
     this.hudScoreList = asElement<HTMLOListElement>(this.root, '#hud-score-list');
     this.hudScoreStatus = asElement<HTMLElement>(this.root, '#hud-score-status');
@@ -639,8 +674,33 @@ export class OverlayUI {
 
           <aside class="level-select-score-panel">
             <h3 id="level-select-current">Level 1</h3>
+            <div class="score-panel-controls">
+              <div class="score-panel-control-field">
+                <label for="score-scope-select" class="level-select-search-label">Scores</label>
+                <select id="score-scope-select" class="level-select-control-input">
+                  <option value="all">All Players</option>
+                  <option value="personal">My Scores</option>
+                </select>
+              </div>
+              <div class="score-panel-control-field">
+                <label for="score-search-input" class="level-select-search-label">Find Player</label>
+                <input
+                  id="score-search-input"
+                  class="level-select-control-input level-select-control-search-input"
+                  type="search"
+                  placeholder="Search by player name"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
+            </div>
             <div id="score-status" class="score-status">Top 10 scores (lower is better)</div>
             <ol id="score-list" class="score-list level-select-score-list"></ol>
+            <div class="score-pagination">
+              <button type="button" id="btn-score-page-prev">Previous</button>
+              <span id="score-page-text">Page 1</span>
+              <button type="button" id="btn-score-page-next">Next</button>
+            </div>
           </aside>
         </div>
       </section>
@@ -965,6 +1025,37 @@ export class OverlayUI {
       this.applyLevelSearchFilter();
     });
 
+    this.scoreSearchInput.addEventListener('input', () => {
+      this.scorePanelQuery.searchText = this.scoreSearchInput.value.trim();
+      this.scorePanelQuery.page = 1;
+      void this.loadScoresForSelectedLevel(true);
+    });
+
+    this.scoreScopeSelect.addEventListener('change', () => {
+      this.scorePanelQuery.scope = this.scoreScopeSelect.value === 'personal' ? 'personal' : 'all';
+      this.scorePanelQuery.page = 1;
+      void this.loadScoresForSelectedLevel(true);
+    });
+
+    this.scorePagePrevButton.addEventListener('click', () => {
+      if (this.scorePanelQuery.page <= 1) {
+        return;
+      }
+
+      this.scorePanelQuery.page -= 1;
+      void this.loadScoresForSelectedLevel(false);
+    });
+
+    this.scorePageNextButton.addEventListener('click', () => {
+      const totalPages = this.scorePanelLastResult?.totalPages ?? 0;
+      if (totalPages > 0 && this.scorePanelQuery.page >= totalPages) {
+        return;
+      }
+
+      this.scorePanelQuery.page += 1;
+      void this.loadScoresForSelectedLevel(false);
+    });
+
     this.editorNameInput.addEventListener('input', () => {
       this.refreshEditorAutoId();
     });
@@ -1132,6 +1223,8 @@ export class OverlayUI {
     this.authState = state;
     this.lastSavedProgressLevelId = null;
     this.pendingProgressLevelId = null;
+    this.scoreCache.clear();
+    this.inFlightScoreRequestMap.clear();
 
     if (state.authenticated && state.user) {
       this.controller.setPlayerName(state.user.playerName);
@@ -1171,6 +1264,20 @@ export class OverlayUI {
     this.editorDeleteButton.disabled = !canPublish;
     this.editorSaveButton.title = canPublish ? 'Publish this level' : 'Sign in to publish levels.';
     this.editorDeleteButton.title = canPublish ? 'Delete a published level you own (or any as admin)' : 'Sign in to delete published levels.';
+
+    const personalOption = this.scoreScopeSelect.querySelector<HTMLOptionElement>('option[value="personal"]');
+    if (personalOption) {
+      personalOption.disabled = !signedIn;
+    }
+    if (!signedIn && this.scoreScopeSelect.value === 'personal') {
+      this.scoreScopeSelect.value = 'all';
+      this.scorePanelQuery.scope = 'all';
+      this.scorePanelQuery.page = 1;
+      this.scorePanelLastResult = null;
+      if (snapshot.screen === 'level-select') {
+        void this.loadScoresForSelectedLevel(true);
+      }
+    }
 
     if (!signedIn && snapshot.playerName.trim().length > 0 && this.accountPlayerNameInput.value.length === 0) {
       this.accountPlayerNameInput.value = snapshot.playerName;
@@ -1518,7 +1625,7 @@ export class OverlayUI {
       const currentLevelId = snapshot.gameState.levelId;
       if (this.lastRenderedHudLevelId !== currentLevelId) {
         this.lastRenderedHudLevelId = currentLevelId;
-        void this.loadScoresForLevel(currentLevelId, false);
+        void this.loadHudScoresForLevel(currentLevelId, false);
       }
     } else {
       this.lastRenderedHudLevelId = null;
@@ -1880,7 +1987,7 @@ export class OverlayUI {
 
     try {
       await deleteCustomLevel({ levelId });
-      this.scoreCache.delete(levelId);
+      this.invalidateScoreCacheForLevel(levelId);
       this.customLevelOwners.delete(levelId);
       const removed = this.controller.removeLevel(levelId);
       if (!removed) {
@@ -1918,6 +2025,85 @@ export class OverlayUI {
     return addCard;
   }
 
+  private scoreCacheKey(levelId: string, query: ScoreQueryOptions): string {
+    const userScopeKey =
+      query.scope === 'personal' ? String(this.authState.user?.id ?? 0) : 'all-users';
+    return `${levelId}::${query.scope}::${userScopeKey}::${query.searchText.toLowerCase()}::${query.page}::${query.pageSize}`;
+  }
+
+  private invalidateScoreCacheForLevel(levelId: string): void {
+    const prefix = `${levelId}::`;
+    for (const key of this.scoreCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.scoreCache.delete(key);
+      }
+    }
+  }
+
+  private defaultScoreQuery(): ScoreQueryOptions {
+    return {
+      scope: 'all',
+      searchText: '',
+      page: 1,
+      pageSize: SCORE_PAGE_SIZE,
+    };
+  }
+
+  private currentScorePanelQuery(): ScoreQueryOptions {
+    const scope = this.scoreScopeSelect.value === 'personal' ? 'personal' : 'all';
+    return {
+      scope,
+      searchText: this.scoreSearchInput.value.trim(),
+      page: this.scorePanelQuery.page,
+      pageSize: SCORE_PAGE_SIZE,
+    };
+  }
+
+  private async fetchScorePage(levelId: string, query: ScoreQueryOptions, forceRefresh: boolean): Promise<ScorePageRecord> {
+    const key = this.scoreCacheKey(levelId, query);
+    if (!forceRefresh) {
+      const cached = this.scoreCache.get(key);
+      if (cached) {
+        return cached;
+      }
+    }
+
+    const inFlight = this.inFlightScoreRequestMap.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = fetchScoresPage(levelId, {
+      scope: query.scope,
+      search: query.searchText,
+      page: query.page,
+      pageSize: query.pageSize,
+    })
+      .then((payload) => {
+        this.scoreCache.set(key, payload);
+        return payload;
+      })
+      .finally(() => {
+        this.inFlightScoreRequestMap.delete(key);
+      });
+    this.inFlightScoreRequestMap.set(key, request);
+    return request;
+  }
+
+  private syncScorePanelPagination(result: ScorePageRecord | null): void {
+    const totalPages = result?.totalPages ?? 0;
+    const page = result?.page ?? this.scorePanelQuery.page;
+    this.scorePagePrevButton.disabled = page <= 1;
+    this.scorePageNextButton.disabled = totalPages === 0 || page >= totalPages;
+    if (!result) {
+      this.scorePageText.textContent = `Page ${this.scorePanelQuery.page}`;
+      return;
+    }
+
+    const displayTotalPages = totalPages === 0 ? 1 : totalPages;
+    this.scorePageText.textContent = `Page ${result.page} / ${displayTotalPages}`;
+  }
+
   private async loadScoresForSelectedLevel(forceRefresh: boolean): Promise<void> {
     const snapshot = this.lastSnapshot;
     if (!snapshot) {
@@ -1926,67 +2112,66 @@ export class OverlayUI {
 
     const level = snapshot.levels[snapshot.selectedLevelIndex];
     if (!level) {
-      this.renderScores('none', []);
+      this.renderScores('none', null);
       return;
+    }
+
+    if (this.lastScorePanelLevelId !== level.id) {
+      this.lastScorePanelLevelId = level.id;
+      this.scorePanelQuery.page = 1;
     }
 
     await this.loadScoresForLevel(level.id, forceRefresh);
   }
 
   private async loadScoresForLevel(levelId: string, forceRefresh: boolean): Promise<void> {
-    if (!forceRefresh && this.scoreCache.has(levelId)) {
-      this.renderScores(levelId, this.scoreCache.get(levelId) ?? []);
+    const query = this.currentScorePanelQuery();
+    this.scorePanelQuery.scope = query.scope;
+    this.scorePanelQuery.searchText = query.searchText;
+    if (query.scope === 'personal' && (!this.authState.authenticated || !this.authState.user)) {
+      this.scorePanelLastResult = null;
+      this.scoreStatus.textContent = 'Sign in to view your personal high scores.';
+      this.scoreList.innerHTML = '';
+      this.syncScorePanelPagination(null);
       return;
     }
 
-    if (!forceRefresh && this.inFlightScoreLevelId === levelId) {
-      return;
-    }
-
-    const nonce = ++this.scoreRequestNonce;
-    this.inFlightScoreLevelId = levelId;
-    this.scoreStatus.textContent = `Loading scores for ${levelId}...`;
-    this.hudScoreStatus.textContent = `Loading scores for ${levelId}...`;
+    const nonce = ++this.scorePanelRequestNonce;
+    this.scoreStatus.textContent = `Loading scores for ${levelId} (page ${query.page})...`;
+    this.syncScorePanelPagination(null);
 
     try {
-      const scores = await fetchTopScores(levelId);
-      if (nonce !== this.scoreRequestNonce) {
+      const result = await this.fetchScorePage(levelId, query, forceRefresh);
+      if (nonce !== this.scorePanelRequestNonce) {
         return;
       }
 
-      this.inFlightScoreLevelId = null;
-      this.scoreCache.set(levelId, scores);
-      this.renderScores(levelId, scores);
+      this.scorePanelLastResult = result;
+      this.renderScores(levelId, result);
     } catch (error) {
-      if (nonce !== this.scoreRequestNonce) {
+      if (nonce !== this.scorePanelRequestNonce) {
         return;
       }
 
-      this.inFlightScoreLevelId = null;
+      this.scorePanelLastResult = null;
       this.scoreStatus.textContent = `Scores unavailable: ${String(error)}`;
-      this.hudScoreStatus.textContent = `Scores unavailable: ${String(error)}`;
       this.scoreList.innerHTML = '';
-      this.hudScoreList.innerHTML = '';
+      this.syncScorePanelPagination(null);
     }
   }
 
   private async loadLevelClearScores(levelId: string, forceRefresh: boolean): Promise<void> {
-    if (!forceRefresh && this.scoreCache.has(levelId)) {
-      this.renderLevelClearScores(levelId, this.scoreCache.get(levelId) ?? []);
-      return;
-    }
-
+    const query = this.defaultScoreQuery();
     this.levelClearScoreStatus.textContent = `Loading scores for ${levelId}...`;
     this.levelClearScoreList.innerHTML = '';
     try {
-      const scores = await fetchTopScores(levelId);
-      this.scoreCache.set(levelId, scores);
+      const result = await this.fetchScorePage(levelId, query, forceRefresh);
 
       if (this.lastSnapshot?.levelClearSummary?.levelId !== levelId) {
         return;
       }
 
-      this.renderLevelClearScores(levelId, scores);
+      this.renderLevelClearScores(levelId, result.scores, result.total);
     } catch (error) {
       if (this.lastSnapshot?.levelClearSummary?.levelId !== levelId) {
         return;
@@ -1997,14 +2182,39 @@ export class OverlayUI {
     }
   }
 
-  private renderLevelClearScores(levelId: string, scores: LevelScoreRecord[]): void {
+  private async loadHudScoresForLevel(levelId: string, forceRefresh: boolean): Promise<void> {
+    const query = this.defaultScoreQuery();
+    this.hudScoreStatus.textContent = `Loading scores for ${levelId}...`;
+    try {
+      const result = await this.fetchScorePage(levelId, query, forceRefresh);
+      const snapshot = this.lastSnapshot;
+      if (!snapshot) {
+        return;
+      }
+
+      if (snapshot.screen !== 'playing' && snapshot.screen !== 'paused') {
+        return;
+      }
+
+      if (snapshot.gameState.levelId !== levelId) {
+        return;
+      }
+
+      this.renderHudScores(levelId, result.scores, result.total);
+    } catch (error) {
+      this.hudScoreStatus.textContent = `Scores unavailable: ${String(error)}`;
+      this.hudScoreList.innerHTML = '';
+    }
+  }
+
+  private renderLevelClearScores(levelId: string, scores: LevelScoreRecord[], total: number): void {
     this.levelClearScoreList.innerHTML = '';
     if (scores.length === 0) {
       this.levelClearScoreStatus.textContent = `${levelId}: no scores yet.`;
       return;
     }
 
-    this.levelClearScoreStatus.textContent = `${levelId}: top ${Math.min(scores.length, 10)} (lower moves, then lower time)`;
+    this.levelClearScoreStatus.textContent = `${levelId}: showing ${scores.length} of ${total} (lower moves, then lower time)`;
     for (let i = 0; i < scores.length; i += 1) {
       const score = scores[i];
       const item = document.createElement('li');
@@ -2013,36 +2223,53 @@ export class OverlayUI {
     }
   }
 
-  private renderScores(levelId: string, scores: LevelScoreRecord[]): void {
-    this.scoreList.innerHTML = '';
+  private renderHudScores(levelId: string, scores: LevelScoreRecord[], total: number): void {
     this.hudScoreList.innerHTML = '';
 
-    const applyScore = (list: HTMLOListElement, score: LevelScoreRecord, index: number): void => {
-      const item = document.createElement('li');
-      item.textContent = `${index + 1}. ${score.playerName} - ${score.moves} moves - ${(score.durationMs / 1000).toFixed(1)}s`;
-      list.append(item);
-    };
-
-    if (levelId === 'none') {
-      this.scoreStatus.textContent = 'No level selected.';
-      this.hudScoreStatus.textContent = 'No level selected.';
-      return;
-    }
-
-    const header = `${levelId}: top ${Math.min(scores.length, 10)} (lower moves, then lower time)`;
-
     if (scores.length === 0) {
-      this.scoreStatus.textContent = `${levelId}: no scores yet.`;
       this.hudScoreStatus.textContent = `${levelId}: no scores yet.`;
       return;
     }
 
-    this.scoreStatus.textContent = header;
-    this.hudScoreStatus.textContent = header;
+    this.hudScoreStatus.textContent = `${levelId}: top ${Math.min(total, SCORE_PAGE_SIZE)} (lower moves, then lower time)`;
     for (let i = 0; i < scores.length; i += 1) {
       const score = scores[i];
-      applyScore(this.scoreList, score, i);
-      applyScore(this.hudScoreList, score, i);
+      const item = document.createElement('li');
+      item.textContent = `${i + 1}. ${score.playerName} - ${score.moves} moves - ${(score.durationMs / 1000).toFixed(1)}s`;
+      this.hudScoreList.append(item);
+    }
+  }
+
+  private renderScores(levelId: string, result: ScorePageRecord | null): void {
+    this.scoreList.innerHTML = '';
+
+    if (levelId === 'none' || !result) {
+      this.scoreStatus.textContent = 'No level selected.';
+      this.syncScorePanelPagination(result);
+      return;
+    }
+
+    this.syncScorePanelPagination(result);
+    if (result.scores.length === 0) {
+      if (result.scope === 'personal') {
+        this.scoreStatus.textContent = result.search.length > 0
+          ? `${levelId}: no personal scores matching "${result.search}".`
+          : `${levelId}: no personal scores yet.`;
+      } else {
+        this.scoreStatus.textContent = result.search.length > 0
+          ? `${levelId}: no scores matching "${result.search}".`
+          : `${levelId}: no scores yet.`;
+      }
+      return;
+    }
+
+    const startRank = (result.page - 1) * result.pageSize;
+    this.scoreStatus.textContent = `${levelId}: showing ${result.scores.length} of ${result.total} (lower moves, then lower time)`;
+    for (let i = 0; i < result.scores.length; i += 1) {
+      const score = result.scores[i];
+      const item = document.createElement('li');
+      item.textContent = `${startRank + i + 1}. ${score.playerName} - ${score.moves} moves - ${(score.durationMs / 1000).toFixed(1)}s`;
+      this.scoreList.append(item);
     }
   }
 
@@ -2057,15 +2284,21 @@ export class OverlayUI {
     }
 
     this.lastHandledScoreSubmissionSequence = submitted.sequence;
-    this.scoreCache.set(submitted.levelId, submitted.scores);
+    this.invalidateScoreCacheForLevel(submitted.levelId);
 
     const selectedLevel = snapshot.levels[snapshot.selectedLevelIndex];
     if (selectedLevel?.id === submitted.levelId) {
-      this.renderScores(submitted.levelId, submitted.scores);
+      void this.loadScoresForSelectedLevel(true);
     }
 
     if (snapshot.levelClearSummary?.levelId === submitted.levelId) {
-      this.renderLevelClearScores(submitted.levelId, submitted.scores);
+      void this.loadLevelClearScores(submitted.levelId, true);
+    }
+
+    if (snapshot.screen === 'playing' || snapshot.screen === 'paused') {
+      if (snapshot.gameState.levelId === submitted.levelId) {
+        void this.loadHudScoresForLevel(submitted.levelId, true);
+      }
     }
   }
 
@@ -2412,7 +2645,7 @@ export class OverlayUI {
         ownerUserId: saved.ownerUserId,
         ownerUsername: saved.ownerUsername,
       });
-      this.scoreCache.delete(saved.id);
+      this.invalidateScoreCacheForLevel(saved.id);
 
       if (validation.warnings.length > 0) {
         this.showEditorFeedback(`Published ${saved.id}. Warning: ${validation.warnings.join(' ')}`);
@@ -2445,7 +2678,7 @@ export class OverlayUI {
 
     try {
       await deleteCustomLevel({ levelId });
-      this.scoreCache.delete(levelId);
+      this.invalidateScoreCacheForLevel(levelId);
       this.customLevelOwners.delete(levelId);
       this.controller.removeLevel(levelId);
       this.editorLoadedLevelId = null;

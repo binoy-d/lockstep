@@ -38,6 +38,12 @@ npm run coverage
 - `GET /api/levels`
 - `POST /api/levels`
 - `GET /api/scores/:levelId`
+  - Query params:
+    - `page` (default `1`)
+    - `pageSize` (default `10`, max `50`)
+    - `search` (optional player-name substring match)
+    - `scope=personal` (requires signed-in session; returns only the current user's scores)
+  - Response fields include `scores`, `page`, `pageSize`, `total`, and `totalPages`.
 - `POST /api/scores`
 
 All requests/responses are JSON.

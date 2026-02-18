@@ -363,3 +363,171 @@ test('returns false publish proof for non-integer user ids', () => {
 
   rmSync(path, { force: true });
 });
+
+/**
+ * Covers paginated leaderboard reads with player-name search and personal-scope filters.
+ */
+test('queries leaderboard pages with search and personal scope', () => {
+  const path = makeTempPath('scores-query');
+  const db = createDatabase(path);
+
+  const userA = db.createUser({
+    username: 'ava_user',
+    passwordHash: 'hash',
+    playerName: 'Ava',
+    isAdmin: false,
+  });
+  const userB = db.createUser({
+    username: 'alex_user',
+    passwordHash: 'hash',
+    playerName: 'Alex',
+    isAdmin: false,
+  });
+
+  db.insertScore({ levelId: 'map0', playerName: 'Ava', userId: userA.id, moves: 5, durationMs: 1000, replay: '5r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Avery', userId: userA.id, moves: 6, durationMs: 1200, replay: '6r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Alex', userId: userB.id, moves: 7, durationMs: 1400, replay: '7r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Blair', moves: 8, durationMs: 1600, replay: '8r' });
+  db.insertScore({ levelId: 'map1', playerName: 'Ava', userId: userA.id, moves: 2, durationMs: 700, replay: '2r' });
+
+  const searchPage = db.queryScores('map0', {
+    limit: 2,
+    offset: 0,
+    searchText: 'av',
+    userId: null,
+  });
+  assert.equal(searchPage.total, 2);
+  assert.equal(searchPage.scores.length, 2);
+  assert.equal(searchPage.scores[0].playerName, 'Ava');
+  assert.equal(searchPage.scores[1].playerName, 'Avery');
+
+  const personalScope = db.queryScores('map0', {
+    limit: 10,
+    offset: 0,
+    searchText: '',
+    userId: userA.id,
+  });
+  assert.equal(personalScope.total, 2);
+  assert.equal(personalScope.scores.every((entry) => entry.playerName === 'Ava' || entry.playerName === 'Avery'), true);
+
+  const paged = db.queryScores('map0', {
+    limit: 2,
+    offset: 2,
+    searchText: '',
+    userId: null,
+  });
+  assert.equal(paged.total, 4);
+  assert.equal(paged.scores.length, 2);
+  assert.equal(paged.scores[0].playerName, 'Alex');
+  assert.equal(paged.scores[1].playerName, 'Blair');
+
+  rmSync(path, { force: true });
+});
+
+/**
+ * Ensures every score submission is retained and replay payloads are persisted for each row.
+ */
+test('stores every submitted score and replay without dropping duplicates', () => {
+  const path = makeTempPath('scores-all-replays');
+  const db = createDatabase(path);
+
+  db.insertScore({ levelId: 'map0', playerName: 'Ava', moves: 5, durationMs: 1000, replay: '5r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Ava', moves: 5, durationMs: 1000, replay: '5r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Ava', moves: 4, durationMs: 900, replay: '4r' });
+
+  const sqlite = new DatabaseSync(path);
+  const countRow = sqlite
+    .prepare(`
+      SELECT COUNT(*) AS total
+      FROM level_scores
+      WHERE level_id = 'map0';
+    `)
+    .get();
+  const replayRows = sqlite
+    .prepare(`
+      SELECT replay
+      FROM level_scores
+      WHERE level_id = 'map0'
+      ORDER BY id ASC;
+    `)
+    .all();
+  sqlite.close();
+
+  assert.equal(countRow.total, 3);
+  assert.deepEqual(
+    replayRows.map((row) => row.replay),
+    ['5r', '5r', '4r'],
+  );
+
+  rmSync(path, { force: true });
+});
+
+/**
+ * Verifies wildcard characters in search text are treated literally and query bounds are clamped.
+ */
+test('escapes wildcard search text and clamps query bounds', () => {
+  const path = makeTempPath('scores-search-escape');
+  const db = createDatabase(path);
+
+  db.insertScore({ levelId: 'map0', playerName: 'Al%pha', moves: 5, durationMs: 1000, replay: '5r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Al_pha', moves: 6, durationMs: 1200, replay: '6r' });
+  db.insertScore({ levelId: 'map0', playerName: 'Alpha', moves: 7, durationMs: 1400, replay: '7r' });
+
+  const percentSearch = db.queryScores('map0', {
+    limit: 0,
+    offset: -5,
+    searchText: 'al%',
+    userId: -1,
+  });
+  assert.equal(percentSearch.limit, 1);
+  assert.equal(percentSearch.offset, 0);
+  assert.equal(percentSearch.total, 1);
+  assert.equal(percentSearch.scores[0].playerName, 'Al%pha');
+
+  const underscoreSearch = db.queryScores('map0', {
+    limit: 200,
+    offset: 0,
+    searchText: 'al_',
+    userId: null,
+  });
+  assert.equal(underscoreSearch.limit, 100);
+  assert.equal(underscoreSearch.total, 1);
+  assert.equal(underscoreSearch.scores[0].playerName, 'Al_pha');
+
+  rmSync(path, { force: true });
+});
+
+/**
+ * Confirms personal-scope queries return no rows when a user has not posted a score on that level.
+ */
+test('returns an empty personal leaderboard page when user has no matching scores', () => {
+  const path = makeTempPath('scores-personal-empty');
+  const db = createDatabase(path);
+
+  const userA = db.createUser({
+    username: 'ava_scores_only',
+    passwordHash: 'hash',
+    playerName: 'Ava',
+    isAdmin: false,
+  });
+  const userB = db.createUser({
+    username: 'blair_no_scores',
+    passwordHash: 'hash',
+    playerName: 'Blair',
+    isAdmin: false,
+  });
+
+  db.insertScore({ levelId: 'map0', playerName: 'Ava', userId: userA.id, moves: 5, durationMs: 1000, replay: '5r' });
+
+  const personalPage = db.queryScores('map0', {
+    limit: 10,
+    offset: 0,
+    searchText: '',
+    userId: userB.id,
+  });
+
+  assert.equal(personalPage.total, 0);
+  assert.equal(personalPage.scores.length, 0);
+
+  rmSync(path, { force: true });
+});

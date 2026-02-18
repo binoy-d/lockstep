@@ -56,6 +56,18 @@ function maybeAddColumn(db, sql) {
   }
 }
 
+function clampInteger(value, min, max, fallback) {
+  if (!Number.isInteger(value)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, value));
+}
+
+function escapeSqlLikeTerm(input) {
+  return input.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+}
+
 export function createDatabase(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
 
@@ -315,12 +327,22 @@ export function createDatabase(dbPath) {
     VALUES(?, ?, ?, ?, ?, ?, ?);
   `);
 
-  const topScoresStmt = db.prepare(`
+  const queryScoresStmt = db.prepare(`
     SELECT player_name AS playerName, moves, duration_ms AS durationMs, created_at AS createdAt
     FROM level_scores
     WHERE level_id = ?
+      AND (? IS NULL OR user_id = ?)
+      AND (? = '' OR lower(player_name) LIKE ? ESCAPE '\\')
     ORDER BY moves ASC, duration_ms ASC, created_at ASC
-    LIMIT ?;
+    LIMIT ? OFFSET ?;
+  `);
+
+  const countScoresStmt = db.prepare(`
+    SELECT COUNT(*) AS total
+    FROM level_scores
+    WHERE level_id = ?
+      AND (? IS NULL OR user_id = ?)
+      AND (? = '' OR lower(player_name) LIKE ? ESCAPE '\\');
   `);
 
   const hasPublishProofStmt = db.prepare(`
@@ -443,8 +465,25 @@ export function createDatabase(dbPath) {
       );
     },
 
+    queryScores(levelId, options = {}) {
+      const limit = clampInteger(options.limit, 1, 100, 10);
+      const offset = clampInteger(options.offset, 0, 1_000_000, 0);
+      const userId = Number.isInteger(options.userId) && options.userId > 0 ? options.userId : null;
+      const searchText = typeof options.searchText === 'string' ? options.searchText.trim().toLowerCase().slice(0, 64) : '';
+      const searchPattern = searchText.length > 0 ? `%${escapeSqlLikeTerm(searchText)}%` : '';
+
+      const scores = queryScoresStmt.all(levelId, userId, userId, searchPattern, searchPattern, limit, offset);
+      const countRow = countScoresStmt.get(levelId, userId, userId, searchPattern, searchPattern);
+      return {
+        scores,
+        total: Number(countRow?.total ?? 0),
+        limit,
+        offset,
+      };
+    },
+
     getTopScores(levelId, limit = 10) {
-      return topScoresStmt.all(levelId, limit);
+      return this.queryScores(levelId, { limit, offset: 0, searchText: '', userId: null }).scores;
     },
 
     hasUserPublishProof(levelId, userId) {

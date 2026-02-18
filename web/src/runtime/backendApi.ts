@@ -20,6 +20,17 @@ export interface LevelScoreRecord {
   createdAt: number;
 }
 
+export interface ScorePageRecord {
+  levelId: string;
+  scope: 'all' | 'personal';
+  search: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  scores: LevelScoreRecord[];
+}
+
 export interface AuthUserRecord {
   id: number;
   username: string;
@@ -249,10 +260,40 @@ export async function saveUserProgress(selectedLevelId: string): Promise<Account
 }
 
 export async function fetchTopScores(levelId: string): Promise<LevelScoreRecord[]> {
-  const payload = await requestJson<{ levelId: string; scores: LevelScoreRecord[] }>(
-    `/scores/${encodeURIComponent(levelId)}`,
-  );
+  const payload = await fetchScoresPage(levelId, {
+    scope: 'all',
+    search: '',
+    page: 1,
+    pageSize: 10,
+  });
   return payload.scores;
+}
+
+export async function fetchScoresPage(
+  levelId: string,
+  options: {
+    scope?: 'all' | 'personal';
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  } = {},
+): Promise<ScorePageRecord> {
+  const params = new URLSearchParams();
+  const scope = options.scope === 'personal' ? 'personal' : 'all';
+  const search = (options.search ?? '').trim().slice(0, 64);
+  const rawPage = typeof options.page === 'number' && Number.isInteger(options.page) ? options.page : 1;
+  const page = Math.max(1, rawPage);
+  const rawPageSize =
+    typeof options.pageSize === 'number' && Number.isInteger(options.pageSize) ? options.pageSize : 10;
+  const pageSize = Math.min(50, Math.max(1, rawPageSize));
+  params.set('scope', scope);
+  params.set('page', String(page));
+  params.set('pageSize', String(pageSize));
+  if (search.length > 0) {
+    params.set('search', search);
+  }
+
+  return requestJson<ScorePageRecord>(`/scores/${encodeURIComponent(levelId)}?${params.toString()}`);
 }
 
 export async function submitScore(input: {

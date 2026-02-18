@@ -166,6 +166,32 @@ function decodePathSegment(input) {
   }
 }
 
+function parsePositiveIntegerParam(raw, fallback, min, max) {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function parseScoreQuery(searchParams) {
+  const page = parsePositiveIntegerParam(searchParams.get('page'), 1, 1, 100_000);
+  const pageSize = parsePositiveIntegerParam(searchParams.get('pageSize'), 10, 1, 50);
+  const searchText = (searchParams.get('search') ?? '').trim().slice(0, 64);
+  const scope = searchParams.get('scope') === 'personal' ? 'personal' : 'all';
+  return {
+    page,
+    pageSize,
+    searchText,
+    scope,
+  };
+}
+
 function resolveLevelForPreview(levelId) {
   const builtInLevel = getBuiltInLevel(levelId);
   if (builtInLevel) {
@@ -607,8 +633,35 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'GET' && pathname.startsWith('/api/scores/')) {
       const levelId = validateLevelId(pathname.slice('/api/scores/'.length));
-      const scores = db.getTopScores(levelId, 10);
-      sendJson(req, res, 200, { levelId, scores });
+      const query = parseScoreQuery(url.searchParams);
+      let scopedUserId = null;
+      if (query.scope === 'personal') {
+        const account = requireAccount(req, res, { requireCsrf: false });
+        if (!account) {
+          return;
+        }
+        scopedUserId = account.user.id;
+      }
+
+      const offset = (query.page - 1) * query.pageSize;
+      const result = db.queryScores(levelId, {
+        limit: query.pageSize,
+        offset,
+        searchText: query.searchText,
+        userId: scopedUserId,
+      });
+
+      const totalPages = result.total === 0 ? 0 : Math.ceil(result.total / result.limit);
+      sendJson(req, res, 200, {
+        levelId,
+        scope: query.scope,
+        search: query.searchText,
+        page: query.page,
+        pageSize: result.limit,
+        total: result.total,
+        totalPages,
+        scores: result.scores,
+      });
       return;
     }
 

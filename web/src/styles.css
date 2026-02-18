@@ -1068,7 +1068,7 @@ select.level-select-control-input {
   background: rgba(7, 12, 20, 0.78);
   padding: 14px;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr auto;
   gap: 8px;
 }
 
@@ -1078,8 +1078,36 @@ select.level-select-control-input {
   font-size: 18px;
 }
 
+.score-panel-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.score-panel-control-field {
+  display: grid;
+  gap: 6px;
+}
+
 .level-select-score-list {
   max-height: none;
+}
+
+.score-pagination {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.score-pagination span {
+  text-align: center;
+  font-size: 12px;
+  color: #bdd5ea;
+}
+
+.score-pagination button {
+  min-width: 0;
+  width: 100%;
 }
 
 @media (max-width: 1280px) {

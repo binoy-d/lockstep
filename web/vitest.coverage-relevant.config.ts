@@ -14,6 +14,7 @@ export default defineConfig({
         'src/core/**/*.ts',
         'src/editor/levelEditorUtils.ts',
         'src/runtime/backingTrackPattern.ts',
+        'src/runtime/backendApi.ts',
         'src/runtime/cameraRumble.ts',
         'src/runtime/enemyPathVisuals.ts',
         'src/runtime/inputFocus.ts',
