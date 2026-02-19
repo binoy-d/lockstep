@@ -1,6 +1,7 @@
 import type { ControllerSnapshot, GameController } from '../app/gameController';
 import { parseLevelText } from '../core/levelParser';
-import type { ParsedLevel } from '../core/types';
+import type { Direction, ParsedLevel } from '../core/types';
+import { generateAdminLevel, solveLevelForAdmin } from '../editor/adminLevelTools';
 import {
   EDITOR_TILE_PALETTE,
   cloneGrid,
@@ -304,7 +305,11 @@ export class OverlayUI {
 
   private readonly editorDeleteButton: HTMLButtonElement;
 
+  private readonly editorAutoGenerateButton: HTMLButtonElement;
+
   private readonly pauseTestBackButton: HTMLButtonElement;
+
+  private readonly pauseTestSolverButton: HTMLButtonElement;
 
   private readonly mobileSwipeHint: HTMLElement;
 
@@ -335,6 +340,18 @@ export class OverlayUI {
   private editorTestingPublishLevelId: string | null = null;
 
   private editorLoadedLevelId: string | null = null;
+
+  private adminSolverBusy = false;
+
+  private solverPlayback:
+    | {
+        levelId: string;
+        path: Direction[];
+        nextIndex: number;
+        baseMoves: number;
+        timerId: number;
+      }
+    | null = null;
 
   private lastSnapshot: ControllerSnapshot | null = null;
 
@@ -481,7 +498,9 @@ export class OverlayUI {
     this.editorSaveButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save');
     this.editorSavePlayButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save-play');
     this.editorDeleteButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-delete');
+    this.editorAutoGenerateButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-auto-generate');
     this.pauseTestBackButton = asElement<HTMLButtonElement>(this.root, '#btn-test-back-editor');
+    this.pauseTestSolverButton = asElement<HTMLButtonElement>(this.root, '#btn-test-solver');
     this.mobileSwipeHint = asElement<HTMLElement>(this.root, '#mobile-swipe-hint');
     this.mobileOpenMenuButton = asElement<HTMLButtonElement>(this.root, '#btn-mobile-open-menu');
     this.mobileOpenSettingsButton = asElement<HTMLButtonElement>(this.root, '#btn-mobile-open-settings');
@@ -776,6 +795,7 @@ export class OverlayUI {
               <div class="button-row editor-card-buttons">
                 <button type="button" id="btn-editor-save">Publish Level</button>
                 <button type="button" id="btn-editor-save-play">Test + Play</button>
+                <button type="button" id="btn-editor-auto-generate" hidden>Auto Generate (Admin)</button>
                 <button type="button" id="btn-editor-delete" class="button-danger">Delete Published Level</button>
                 <button type="button" id="btn-editor-export">Download .txt</button>
               </div>
@@ -821,6 +841,7 @@ export class OverlayUI {
           <button type="button" id="btn-restart">Restart</button>
           <button type="button" id="btn-pause-level-select">Level Select</button>
           <button type="button" id="btn-test-back-editor" hidden>Back to Editor (Test)</button>
+          <button type="button" id="btn-test-solver" hidden>Run Solver (Admin)</button>
           <button type="button" id="btn-main-menu">Main Menu</button>
           <button type="button" id="btn-pause-settings">Settings</button>
         </div>
@@ -987,6 +1008,10 @@ export class OverlayUI {
       void this.deleteEditorLevel();
     });
 
+    this.editorAutoGenerateButton.addEventListener('click', () => {
+      this.autoGenerateEditorLevel();
+    });
+
     asElement<HTMLButtonElement>(this.root, '#btn-editor-export').addEventListener('click', () => {
       this.exportEditorText();
     });
@@ -997,6 +1022,10 @@ export class OverlayUI {
 
     this.pauseTestBackButton.addEventListener('click', () => {
       this.returnFromEditorTest();
+    });
+
+    this.pauseTestSolverButton.addEventListener('click', () => {
+      void this.toggleAdminSolverForPlaytest();
     });
 
     this.playerNameInput.addEventListener('input', () => {
@@ -1282,11 +1311,40 @@ export class OverlayUI {
     if (!signedIn && snapshot.playerName.trim().length > 0 && this.accountPlayerNameInput.value.length === 0) {
       this.accountPlayerNameInput.value = snapshot.playerName;
     }
+
+    this.refreshAdminEditorControls(snapshot);
   }
 
   private setAccountFeedback(message: string, isError = false): void {
     this.accountFeedback.textContent = message;
     this.accountFeedback.classList.toggle('account-feedback-error', isError);
+  }
+
+  private isAdminUser(): boolean {
+    return Boolean(this.authState.authenticated && this.authState.user?.isAdmin);
+  }
+
+  private refreshAdminEditorControls(snapshot: ControllerSnapshot): void {
+    const isAdmin = this.isAdminUser();
+    this.editorAutoGenerateButton.hidden = !isAdmin;
+    this.editorAutoGenerateButton.disabled = !isAdmin;
+    this.editorAutoGenerateButton.title = isAdmin
+      ? 'Auto-generate a solvable level by seed, players, and difficulty.'
+      : 'Admin-only feature.';
+
+    const runtimeTestLevelId = this.editorTestingPublishLevelId
+      ? `${EDITOR_TEST_LEVEL_ID}-${this.editorTestingPublishLevelId}`
+      : null;
+    const canSolvePlaytest = isAdmin && runtimeTestLevelId === snapshot.gameState.levelId;
+    this.pauseTestSolverButton.hidden = !canSolvePlaytest;
+    this.pauseTestSolverButton.disabled = !canSolvePlaytest || this.adminSolverBusy;
+    if (this.adminSolverBusy) {
+      this.pauseTestSolverButton.textContent = 'Solving...';
+    } else if (this.solverPlayback) {
+      this.pauseTestSolverButton.textContent = 'Stop Solver (Admin)';
+    } else {
+      this.pauseTestSolverButton.textContent = 'Run Solver (Admin)';
+    }
   }
 
   private async loadSavedProgressForAccount(): Promise<void> {
@@ -1534,6 +1592,14 @@ export class OverlayUI {
     }
 
     this.applyCompletedScoreSubmission(snapshot);
+
+    if (this.solverPlayback) {
+      if (snapshot.gameState.levelId !== this.solverPlayback.levelId) {
+        this.stopSolverPlayback();
+      } else if (snapshot.screen !== 'playing' && snapshot.screen !== 'paused') {
+        this.stopSolverPlayback();
+      }
+    }
 
     const canPlay = snapshot.playerName.trim().length > 0;
     if (this.autoStartFromDeepLinkPending && snapshot.screen === 'intro' && canPlay) {
@@ -1962,6 +2028,7 @@ export class OverlayUI {
   }
 
   private openEditorForExistingLevel(level: ParsedLevel): void {
+    this.stopSolverPlayback();
     const snapshot = this.controller.getSnapshot();
     const levelIndex = snapshot.levels.findIndex((entry) => entry.id === level.id);
     this.editorGrid = cloneGrid(level.grid);
@@ -2442,6 +2509,7 @@ export class OverlayUI {
   }
 
   private openEditorForCopiedLevel(level: ParsedLevel): void {
+    this.stopSolverPlayback();
     const snapshot = this.controller.getSnapshot();
     const levelIndex = snapshot.levels.findIndex((entry) => entry.id === level.id);
     const sourceName = this.getDisplayLevelName(level, levelIndex >= 0 ? levelIndex : 0);
@@ -2460,6 +2528,7 @@ export class OverlayUI {
   }
 
   private openEditorForBlankLevel(): void {
+    this.stopSolverPlayback();
     this.editorGrid = this.createBlankGrid(25, 16);
     this.editorTestingPublishLevelId = null;
     this.editorLoadedLevelId = null;
@@ -2470,6 +2539,198 @@ export class OverlayUI {
     this.showEditorFeedback(
       this.authState.authenticated ? 'Created blank level template.' : 'Created blank template. Sign in to publish.',
     );
+  }
+
+  private autoGenerateEditorLevel(): void {
+    if (!this.isAdminUser()) {
+      this.showEditorFeedback('Admin sign-in required to auto-generate levels.', true);
+      return;
+    }
+
+    const width = this.editorGrid[0]?.length ?? 25;
+    const height = this.editorGrid.length || 16;
+    const defaultSeed = `seed-${Date.now().toString(36).slice(-8)}`;
+    const seedRaw = window.prompt('Seed (< 32 chars):', defaultSeed);
+    if (seedRaw === null) {
+      return;
+    }
+
+    const playersRaw = window.prompt('Number of players (integer >= 1):', '1');
+    if (playersRaw === null) {
+      return;
+    }
+
+    const difficultyRaw = window.prompt('Difficulty (minimum solve moves, 1-100):', '20');
+    if (difficultyRaw === null) {
+      return;
+    }
+
+    const seed = seedRaw.trim();
+    const players = Number.parseInt(playersRaw, 10);
+    const difficulty = Number.parseInt(difficultyRaw, 10);
+    if (!Number.isInteger(players) || !Number.isInteger(difficulty)) {
+      this.showEditorFeedback('Players and difficulty must be integers.', true);
+      return;
+    }
+
+    try {
+      const generated = generateAdminLevel({
+        seed,
+        players,
+        difficulty,
+        width,
+        height,
+        maxAttempts: 96,
+      });
+
+      this.stopSolverPlayback();
+      this.editorGrid = cloneGrid(generated.grid);
+      this.editorTestingPublishLevelId = null;
+      this.editorLoadedLevelId = null;
+      if (this.editorNameInput.value.trim().length === 0 || this.editorNameInput.value.startsWith('Generated ')) {
+        this.editorNameInput.value = `Generated ${seed}`.slice(0, 64);
+      }
+      this.refreshEditorAutoId();
+      this.renderEditorGrid();
+      this.showEditorFeedback(
+        `Generated ${width}x${height} level (${players} player${players === 1 ? '' : 's'}) solved in ${generated.minMoves} moves.`,
+      );
+    } catch (error) {
+      this.showEditorFeedback(`Auto-generate failed: ${formatError(error)}`, true);
+    }
+  }
+
+  private async toggleAdminSolverForPlaytest(): Promise<void> {
+    if (!this.isAdminUser()) {
+      this.statusText.textContent = 'Admin sign-in required to run solver playback.';
+      return;
+    }
+
+    if (this.solverPlayback) {
+      this.stopSolverPlayback('Solver playback stopped.');
+      return;
+    }
+
+    if (this.adminSolverBusy) {
+      return;
+    }
+
+    const snapshot = this.controller.getSnapshot();
+    const runtimeTestLevelId = this.editorTestingPublishLevelId
+      ? `${EDITOR_TEST_LEVEL_ID}-${this.editorTestingPublishLevelId}`
+      : null;
+    if (!runtimeTestLevelId || snapshot.gameState.levelId !== runtimeTestLevelId) {
+      this.statusText.textContent = 'Start Test + Play in the editor before running solver playback.';
+      return;
+    }
+
+    const level = snapshot.levels.find((entry) => entry.id === runtimeTestLevelId);
+    if (!level) {
+      this.statusText.textContent = 'Solver unavailable: test level not found.';
+      return;
+    }
+
+    this.adminSolverBusy = true;
+    this.refreshAdminEditorControls(snapshot);
+    this.statusText.textContent = `Solving ${runtimeTestLevelId}...`;
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 0);
+    });
+
+    const solved = solveLevelForAdmin(level, {
+      maxMoves: 420,
+      maxVisited: 500000,
+    });
+    this.adminSolverBusy = false;
+
+    if (!solved.path || solved.minMoves === null) {
+      this.refreshAdminEditorControls(this.controller.getSnapshot());
+      this.statusText.textContent = solved.truncated
+        ? 'Solver search aborted: state space limit reached.'
+        : 'Solver could not find a valid path for this level.';
+      return;
+    }
+
+    this.controller.restartCurrentLevel();
+    this.startSolverPlayback(runtimeTestLevelId, solved.path);
+    this.statusText.textContent = `Solver running (${solved.minMoves} moves).`;
+    this.refreshAdminEditorControls(this.controller.getSnapshot());
+  }
+
+  private startSolverPlayback(levelId: string, path: Direction[]): void {
+    this.stopSolverPlayback();
+    const baseMoves = this.controller.getSnapshot().gameState.moves;
+    const timerId = window.setInterval(() => {
+      const playback = this.solverPlayback;
+      if (!playback) {
+        return;
+      }
+
+      const snapshot = this.controller.getSnapshot();
+      if (snapshot.gameState.levelId !== playback.levelId) {
+        this.stopSolverPlayback();
+        return;
+      }
+
+      if (snapshot.screen === 'paused') {
+        return;
+      }
+
+      if (snapshot.screen !== 'playing') {
+        this.stopSolverPlayback();
+        return;
+      }
+
+      if (snapshot.gameState.lastEvent === 'level-reset') {
+        this.stopSolverPlayback('Solver stopped: level reset triggered.', true);
+        return;
+      }
+
+      const expectedMoves = playback.baseMoves + playback.nextIndex;
+      if (snapshot.gameState.moves < expectedMoves) {
+        return;
+      }
+
+      if (snapshot.gameState.moves > expectedMoves) {
+        this.stopSolverPlayback('Solver stopped: manual input changed state.', true);
+        return;
+      }
+
+      if (playback.nextIndex >= playback.path.length) {
+        this.stopSolverPlayback('Solver playback complete.');
+        return;
+      }
+
+      this.controller.queueDirection(playback.path[playback.nextIndex]);
+      playback.nextIndex += 1;
+    }, 40);
+
+    this.solverPlayback = {
+      levelId,
+      path,
+      nextIndex: 0,
+      baseMoves,
+      timerId,
+    };
+  }
+
+  private stopSolverPlayback(message?: string, isError = false): void {
+    if (!this.solverPlayback) {
+      if (message) {
+        this.statusText.textContent = message;
+      }
+      return;
+    }
+
+    window.clearInterval(this.solverPlayback.timerId);
+    this.solverPlayback = null;
+    if (message) {
+      this.statusText.textContent = message;
+    }
+    if (isError && this.lastSnapshot?.screen === 'editor') {
+      this.showEditorFeedback(this.statusText.textContent || 'Solver stopped.', true);
+    }
+    this.refreshAdminEditorControls(this.lastSnapshot ?? this.controller.getSnapshot());
   }
 
   private resizeEditorGrid(): void {
@@ -2550,6 +2811,7 @@ export class OverlayUI {
       return;
     }
 
+    this.stopSolverPlayback();
     this.ensureEditorTestPlayerName();
 
     if (!this.validateEditorGrid()) {
@@ -2582,6 +2844,7 @@ export class OverlayUI {
   }
 
   private returnFromEditorTest(): void {
+    this.stopSolverPlayback();
     if (!this.editorTestingPublishLevelId) {
       this.controller.openEditor();
       return;

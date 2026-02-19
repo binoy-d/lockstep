@@ -12,6 +12,7 @@ export default defineConfig({
         'src/app/deathImpact.ts',
         'src/app/gameController.ts',
         'src/core/**/*.ts',
+        'src/editor/adminLevelTools.ts',
         'src/editor/levelEditorUtils.ts',
         'src/runtime/backingTrackPattern.ts',
         'src/runtime/backendApi.ts',
