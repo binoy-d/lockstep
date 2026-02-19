@@ -349,6 +349,7 @@ export class OverlayUI {
         path: Direction[];
         nextIndex: number;
         baseMoves: number;
+        stallTicks: number;
         timerId: number;
       }
     | null = null;
@@ -2681,15 +2682,19 @@ export class OverlayUI {
         return;
       }
 
-      if (snapshot.gameState.lastEvent === 'level-reset') {
-        this.stopSolverPlayback('Solver stopped: level reset triggered.', true);
-        return;
-      }
-
       const expectedMoves = playback.baseMoves + playback.nextIndex;
       if (snapshot.gameState.moves < expectedMoves) {
+        playback.stallTicks += 1;
+        if (
+          playback.nextIndex > 0 &&
+          (snapshot.deathAnimation !== null ||
+            (snapshot.gameState.lastEvent === 'level-reset' && playback.stallTicks > 8))
+        ) {
+          this.stopSolverPlayback('Solver stopped: level reset triggered.', true);
+        }
         return;
       }
+      playback.stallTicks = 0;
 
       if (snapshot.gameState.moves > expectedMoves) {
         this.stopSolverPlayback('Solver stopped: manual input changed state.', true);
@@ -2710,6 +2715,7 @@ export class OverlayUI {
       path,
       nextIndex: 0,
       baseMoves,
+      stallTicks: 0,
       timerId,
     };
   }
