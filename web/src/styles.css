@@ -1336,6 +1336,22 @@ select.level-select-control-input {
   color: var(--danger);
 }
 
+.editor-auto-generate-progress {
+  margin-top: 8px;
+  padding: 8px 10px;
+  min-height: 44px;
+  max-height: 140px;
+  overflow: auto;
+  border: 1px solid rgba(122, 173, 219, 0.2);
+  border-radius: 8px;
+  background: rgba(8, 14, 22, 0.72);
+  color: var(--muted);
+  font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
 .boot-error {
   color: #ff9ca5;
   padding: 16px;

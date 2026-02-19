@@ -48,6 +48,21 @@ export interface GenerateAdminLevelOptions {
   maxAttempts?: number;
 }
 
+export interface GenerateAdminLevelProgress {
+  attempt: number;
+  maxAttempts: number;
+  percent: number;
+  elapsedMs: number;
+  stage: 'searching' | 'complete';
+  message: string;
+}
+
+export interface GenerateAdminLevelAsyncOptions extends GenerateAdminLevelOptions {
+  onProgress?: (progress: GenerateAdminLevelProgress) => void;
+  yieldEveryAttempts?: number;
+  maxDurationMs?: number;
+}
+
 export interface GeneratedAdminLevel {
   seed: string;
   attempt: number;
@@ -62,6 +77,26 @@ export interface GeneratedAdminLevel {
   minMoves: number;
   solverPath: Direction[];
   visitedStates: number;
+}
+
+interface GenerationCandidate {
+  attempt: number;
+  grid: string[][];
+  levelText: string;
+  parsed: ParsedLevel;
+  solvedPath: Direction[];
+  solvedMoves: number;
+  visitedStates: number;
+  score: number;
+}
+
+interface GenerationContext {
+  normalized: Required<GenerateAdminLevelOptions>;
+  interiorWidth: number;
+  interiorHeight: number;
+  laneHeight: number;
+  solverMaxMoves: number;
+  maxAllowedOvershoot: number;
 }
 
 function xmur3(input: string): () => number {
@@ -742,7 +777,7 @@ function hasUsefulCouplingFallback(
   return coupling !== null && coupling.playerBlocks > 0 && coupling.uniquePairs > 0;
 }
 
-function buildStateKey(state: GameState): string {
+function buildDynamicStateKey(state: GameState): string {
   const players = state.players
     .slice()
     .sort((left, right) => left.id - right.id)
@@ -755,6 +790,12 @@ function buildStateKey(state: GameState): string {
     .join(';');
   const grid = state.grid.map((row) => row.join('')).join('|');
   return `${state.playersDone}|${players}|${enemies}|${grid}`;
+}
+
+function buildStaticStateKey(state: GameState): string {
+  // In generated admin levels the grid is static and there are no enemies, so we key by player positions only.
+  const players = state.players.map((player) => `${player.id}:${player.x},${player.y}`).join(';');
+  return `${state.playersDone}|${players}`;
 }
 
 function reconstructPath(
@@ -781,9 +822,10 @@ export function solveLevelForAdmin(level: ParsedLevel, options: SolverOptions = 
     typeof options.maxMoves === 'number' && Number.isInteger(options.maxMoves) ? options.maxMoves : 260;
   const maxVisited =
     typeof options.maxVisited === 'number' && Number.isInteger(options.maxVisited) ? options.maxVisited : 550000;
+  const keyForState = level.enemySpawns.length === 0 ? buildStaticStateKey : buildDynamicStateKey;
 
   const initialState = createInitialState([level], 0);
-  const initialKey = buildStateKey(initialState);
+  const initialKey = keyForState(initialState);
   const queue: Array<{ key: string; state: GameState; depth: number }> = [
     { key: initialKey, state: initialState, depth: 0 },
   ];
@@ -807,7 +849,7 @@ export function solveLevelForAdmin(level: ParsedLevel, options: SolverOptions = 
       }
 
       const nextDepth = current.depth + 1;
-      const nextKey = buildStateKey(next);
+      const nextKey = keyForState(next);
       if (depthMap.has(nextKey)) {
         continue;
       }
@@ -846,7 +888,7 @@ export function solveLevelForAdmin(level: ParsedLevel, options: SolverOptions = 
   };
 }
 
-export function generateAdminLevel(options: GenerateAdminLevelOptions): GeneratedAdminLevel {
+function buildGenerationContext(options: GenerateAdminLevelOptions): GenerationContext {
   const normalized = normalizeInputs(options);
   const feasibility = feasibilityFor(normalized);
   if (!feasibility.feasible) {
@@ -856,154 +898,248 @@ export function generateAdminLevel(options: GenerateAdminLevelOptions): Generate
   const interiorWidth = normalized.width - 2;
   const interiorHeight = normalized.height - 2;
   const laneHeight = laneHeightForPlayers(normalized.height, normalized.players);
-  const solverMaxMoves = normalized.players > 1 ? normalized.difficulty + Math.max(12, normalized.players * 5) : normalized.difficulty;
+  const solverMaxMoves =
+    normalized.players > 1 ? normalized.difficulty + Math.max(12, normalized.players * 5) : normalized.difficulty;
   const maxAllowedOvershoot = normalized.players > 1 ? Math.max(8, normalized.players * 4) : 0;
-  let bestFallback:
-    | {
-        attempt: number;
-        grid: string[][];
-        levelText: string;
-        parsed: ParsedLevel;
-        solvedPath: Direction[];
-        solvedMoves: number;
-        visitedStates: number;
-        score: number;
-      }
-    | null = null;
 
-  for (let attempt = 0; attempt < normalized.maxAttempts; attempt += 1) {
-    const random = createSeededRandom(`${normalized.seed}|attempt:${attempt}`);
-    const targetLength =
-      normalized.difficulty +
-      normalized.players +
-      random.int(1, Math.max(6, normalized.players * 2 + 8));
-    if (targetLength > interiorWidth * interiorHeight) {
+  return {
+    normalized,
+    interiorWidth,
+    interiorHeight,
+    laneHeight,
+    solverMaxMoves,
+    maxAllowedOvershoot,
+  };
+}
+
+function toGeneratedLevel(context: GenerationContext, candidate: GenerationCandidate): GeneratedAdminLevel {
+  return {
+    seed: context.normalized.seed,
+    attempt: candidate.attempt,
+    players: context.normalized.players,
+    difficulty: context.normalized.difficulty,
+    width: context.normalized.width,
+    height: context.normalized.height,
+    laneHeight: context.laneHeight,
+    level: candidate.parsed,
+    grid: cloneGrid(candidate.grid),
+    levelText: candidate.levelText,
+    minMoves: candidate.solvedMoves,
+    solverPath: candidate.solvedPath,
+    visitedStates: candidate.visitedStates,
+  };
+}
+
+function evaluateAttempt(context: GenerationContext, attempt: number): {
+  resolved: GenerationCandidate | null;
+  fallback: GenerationCandidate | null;
+} {
+  const { normalized, interiorWidth, interiorHeight, solverMaxMoves, maxAllowedOvershoot } = context;
+  const random = createSeededRandom(`${normalized.seed}|attempt:${attempt}`);
+  const targetLength = normalized.difficulty + normalized.players + random.int(1, Math.max(6, normalized.players * 2 + 8));
+  if (targetLength > interiorWidth * interiorHeight) {
+    return { resolved: null, fallback: null };
+  }
+
+  const localPath = findPathWithLength(interiorWidth, interiorHeight, targetLength, random);
+  if (!localPath || localPath.length <= normalized.difficulty) {
+    return { resolved: null, fallback: null };
+  }
+
+  if (!hasInterestingGeometry(localPath.slice(0, normalized.difficulty + 1), normalized.difficulty)) {
+    return { resolved: null, fallback: null };
+  }
+
+  const openKeys = carveCouplingPockets(localPath, interiorWidth, interiorHeight, normalized.difficulty, random);
+  const spawnCandidates = buildSpawnIndexCandidates(localPath.length, normalized.players, normalized.difficulty, random);
+  if (spawnCandidates.length === 0) {
+    return { resolved: null, fallback: null };
+  }
+
+  const thresholds = couplingThresholdsFor(normalized, attempt);
+  const quickMaxVisited = 36000;
+  const fullMaxVisited = 120000;
+  let bestFallback: GenerationCandidate | null = null;
+
+  for (const spawnIndexes of spawnCandidates) {
+    const grid = buildGridFromPath(normalized, random, localPath, spawnIndexes, openKeys);
+    const levelText = grid.map((row) => row.join('')).join('\n');
+
+    let parsed: ParsedLevel;
+    try {
+      parsed = parseLevelText(`admin-generated-${attempt}`, levelText, `Generated ${normalized.seed}`);
+    } catch {
       continue;
     }
 
-    const localPath = findPathWithLength(interiorWidth, interiorHeight, targetLength, random);
-    if (!localPath || localPath.length <= normalized.difficulty) {
+    if (parsed.playerSpawns.length !== normalized.players) {
       continue;
     }
 
-    if (!hasInterestingGeometry(localPath.slice(0, normalized.difficulty + 1), normalized.difficulty)) {
-      continue;
-    }
-
-    const openKeys = carveCouplingPockets(localPath, interiorWidth, interiorHeight, normalized.difficulty, random);
-    const spawnCandidates = buildSpawnIndexCandidates(localPath.length, normalized.players, normalized.difficulty, random);
-    if (spawnCandidates.length === 0) {
-      continue;
-    }
-
-    const thresholds = couplingThresholdsFor(normalized, attempt);
-
-    for (const spawnIndexes of spawnCandidates) {
-      const grid = buildGridFromPath(normalized, random, localPath, spawnIndexes, openKeys);
-      const levelText = grid.map((row) => row.join('')).join('\n');
-      let parsed: ParsedLevel;
-      try {
-        parsed = parseLevelText(`admin-generated-${attempt}`, levelText, `Generated ${normalized.seed}`);
-      } catch {
-        continue;
-      }
-
-      if (parsed.playerSpawns.length !== normalized.players) {
-        continue;
-      }
-
-      const solved = solveLevelForAdmin(parsed, {
+    let solved = solveLevelForAdmin(parsed, {
+      maxMoves: solverMaxMoves,
+      maxVisited: quickMaxVisited,
+    });
+    if ((!solved.path || solved.minMoves === null) && solved.truncated) {
+      solved = solveLevelForAdmin(parsed, {
         maxMoves: solverMaxMoves,
-        maxVisited: 120000,
+        maxVisited: fullMaxVisited,
       });
-      if (!solved.path || solved.minMoves === null) {
-        continue;
-      }
+    }
+    if (!solved.path || solved.minMoves === null) {
+      continue;
+    }
 
-      const matchesDifficulty =
-        normalized.players === 1
-          ? solved.minMoves === normalized.difficulty
-          : solved.minMoves >= normalized.difficulty &&
-            solved.minMoves <= normalized.difficulty + maxAllowedOvershoot;
-      if (!matchesDifficulty) {
-        continue;
-      }
+    const matchesDifficulty =
+      normalized.players === 1
+        ? solved.minMoves === normalized.difficulty
+        : solved.minMoves >= normalized.difficulty && solved.minMoves <= normalized.difficulty + maxAllowedOvershoot;
+    if (!matchesDifficulty) {
+      continue;
+    }
 
-      const coupling = normalized.players > 1 ? analyzeCoupling(parsed, solved.path) : null;
-      if (normalized.players > 1 && coupling === null) {
-        continue;
-      }
+    const coupling = normalized.players > 1 ? analyzeCoupling(parsed, solved.path) : null;
+    if (normalized.players > 1 && coupling === null) {
+      continue;
+    }
 
-      const turns = countDirectionTurns(solved.path);
-      if (turns < Math.max(2, Math.floor(normalized.difficulty / 10))) {
-        continue;
-      }
+    const turns = countDirectionTurns(solved.path);
+    if (turns < Math.max(2, Math.floor(normalized.difficulty / 10))) {
+      continue;
+    }
 
-      const meetsThresholds =
-        normalized.players === 1 ||
-        (coupling !== null &&
-          coupling.playerBlocks >= thresholds.minimumBlocks &&
-          coupling.mixedBlockSteps >= thresholds.minimumMixedSteps &&
-          coupling.uniqueBlockedPlayers >= thresholds.minimumBlockedPlayers &&
-          coupling.uniquePairs >= thresholds.minimumPairs);
+    const meetsThresholds =
+      normalized.players === 1 ||
+      (coupling !== null &&
+        coupling.playerBlocks >= thresholds.minimumBlocks &&
+        coupling.mixedBlockSteps >= thresholds.minimumMixedSteps &&
+        coupling.uniqueBlockedPlayers >= thresholds.minimumBlockedPlayers &&
+        coupling.uniquePairs >= thresholds.minimumPairs);
 
-      const score = couplingScore(solved.path, coupling) - Math.abs(solved.minMoves - normalized.difficulty) * 6;
-      if (meetsThresholds) {
-        return {
-          seed: normalized.seed,
-          attempt,
-          players: normalized.players,
-          difficulty: normalized.difficulty,
-          width: normalized.width,
-          height: normalized.height,
-          laneHeight,
-          level: parsed,
-          grid: cloneGrid(grid),
-          levelText,
-          minMoves: solved.minMoves,
-          solverPath: solved.path,
-          visitedStates: solved.visitedStates,
-        };
-      }
+    const score = couplingScore(solved.path, coupling) - Math.abs(solved.minMoves - normalized.difficulty) * 6;
+    const candidate: GenerationCandidate = {
+      attempt,
+      grid: cloneGrid(grid),
+      levelText,
+      parsed,
+      solvedPath: solved.path,
+      solvedMoves: solved.minMoves,
+      visitedStates: solved.visitedStates,
+      score,
+    };
+    if (meetsThresholds) {
+      return { resolved: candidate, fallback: bestFallback };
+    }
 
-      if (!hasUsefulCouplingFallback(normalized, coupling)) {
-        continue;
-      }
+    if (!hasUsefulCouplingFallback(normalized, coupling)) {
+      continue;
+    }
 
-      if (!bestFallback || score > bestFallback.score) {
-        bestFallback = {
-          attempt,
-          grid: cloneGrid(grid),
-          levelText,
-          parsed,
-          solvedPath: solved.path,
-          solvedMoves: solved.minMoves,
-          visitedStates: solved.visitedStates,
-          score,
-        };
-      }
+    if (!bestFallback || candidate.score > bestFallback.score) {
+      bestFallback = candidate;
+    }
+  }
+
+  return { resolved: null, fallback: bestFallback };
+}
+
+export function generateAdminLevel(options: GenerateAdminLevelOptions): GeneratedAdminLevel {
+  const context = buildGenerationContext(options);
+  let bestFallback: GenerationCandidate | null = null;
+
+  for (let attempt = 0; attempt < context.normalized.maxAttempts; attempt += 1) {
+    const outcome = evaluateAttempt(context, attempt);
+    if (outcome.resolved) {
+      return toGeneratedLevel(context, outcome.resolved);
+    }
+
+    if (outcome.fallback && (!bestFallback || outcome.fallback.score > bestFallback.score)) {
+      bestFallback = outcome.fallback;
     }
   }
 
   if (bestFallback) {
-    return {
-      seed: normalized.seed,
-      attempt: bestFallback.attempt,
-      players: normalized.players,
-      difficulty: normalized.difficulty,
-      width: normalized.width,
-      height: normalized.height,
-      laneHeight,
-      level: bestFallback.parsed,
-      grid: cloneGrid(bestFallback.grid),
-      levelText: bestFallback.levelText,
-      minMoves: bestFallback.solvedMoves,
-      solverPath: bestFallback.solvedPath,
-      visitedStates: bestFallback.visitedStates,
-    };
+    return toGeneratedLevel(context, bestFallback);
   }
 
   throw new Error(
-    `Unable to generate a smart solvable level after ${normalized.maxAttempts} attempts for difficulty ${normalized.difficulty}.`,
+    `Unable to generate a smart solvable level after ${context.normalized.maxAttempts} attempts for difficulty ${context.normalized.difficulty}.`,
+  );
+}
+
+function waitForNextTurn(): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+export async function generateAdminLevelAsync(options: GenerateAdminLevelAsyncOptions): Promise<GeneratedAdminLevel> {
+  const context = buildGenerationContext(options);
+  const startMs = Date.now();
+  const yieldEveryAttempts = Math.max(1, options.yieldEveryAttempts ?? 2);
+  const maxDurationMs = Math.max(1000, options.maxDurationMs ?? 30000);
+  let bestFallback: GenerationCandidate | null = null;
+
+  options.onProgress?.({
+    attempt: 0,
+    maxAttempts: context.normalized.maxAttempts,
+    percent: 0,
+    elapsedMs: 0,
+    stage: 'searching',
+    message: `Starting generation (0/${context.normalized.maxAttempts})`,
+  });
+
+  for (let attempt = 0; attempt < context.normalized.maxAttempts; attempt += 1) {
+    if (attempt > 0 && attempt % yieldEveryAttempts === 0) {
+      await waitForNextTurn();
+    }
+
+    const outcome = evaluateAttempt(context, attempt);
+    if (outcome.resolved) {
+      const level = toGeneratedLevel(context, outcome.resolved);
+      options.onProgress?.({
+        attempt: attempt + 1,
+        maxAttempts: context.normalized.maxAttempts,
+        percent: 100,
+        elapsedMs: Date.now() - startMs,
+        stage: 'complete',
+        message: `Generated in ${attempt + 1} attempt${attempt + 1 === 1 ? '' : 's'}.`,
+      });
+      return level;
+    }
+
+    if (outcome.fallback && (!bestFallback || outcome.fallback.score > bestFallback.score)) {
+      bestFallback = outcome.fallback;
+    }
+
+    options.onProgress?.({
+      attempt: attempt + 1,
+      maxAttempts: context.normalized.maxAttempts,
+      percent: Math.round(((attempt + 1) / context.normalized.maxAttempts) * 100),
+      elapsedMs: Date.now() - startMs,
+      stage: 'searching',
+      message: `Searching attempts ${attempt + 1}/${context.normalized.maxAttempts}...`,
+    });
+
+    if (Date.now() - startMs >= maxDurationMs && bestFallback) {
+      const level = toGeneratedLevel(context, bestFallback);
+      options.onProgress?.({
+        attempt: attempt + 1,
+        maxAttempts: context.normalized.maxAttempts,
+        percent: Math.round(((attempt + 1) / context.normalized.maxAttempts) * 100),
+        elapsedMs: Date.now() - startMs,
+        stage: 'complete',
+        message: 'Time limit reached; returning best candidate found.',
+      });
+      return level;
+    }
+  }
+
+  if (bestFallback) {
+    return toGeneratedLevel(context, bestFallback);
+  }
+
+  throw new Error(
+    `Unable to generate a smart solvable level after ${context.normalized.maxAttempts} attempts for difficulty ${context.normalized.difficulty}.`,
   );
 }

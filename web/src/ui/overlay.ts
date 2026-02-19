@@ -1,7 +1,7 @@
 import type { ControllerSnapshot, GameController } from '../app/gameController';
 import { parseLevelText } from '../core/levelParser';
 import type { Direction, ParsedLevel } from '../core/types';
-import { generateAdminLevel, solveLevelForAdmin } from '../editor/adminLevelTools';
+import { generateAdminLevelAsync, solveLevelForAdmin, type GenerateAdminLevelProgress } from '../editor/adminLevelTools';
 import {
   EDITOR_TILE_PALETTE,
   cloneGrid,
@@ -295,6 +295,8 @@ export class OverlayUI {
 
   private readonly editorFeedback: HTMLElement;
 
+  private readonly editorAutoGenerateProgress: HTMLElement;
+
   private readonly editorSelectedTile: HTMLElement;
 
   private readonly editorPaletteRoot: HTMLElement;
@@ -342,6 +344,10 @@ export class OverlayUI {
   private editorLoadedLevelId: string | null = null;
 
   private adminSolverBusy = false;
+
+  private adminAutoGenerateBusy = false;
+
+  private autoGenerateProgressLog: string[] = [];
 
   private solverPlayback:
     | {
@@ -494,6 +500,7 @@ export class OverlayUI {
     this.editorPlayerNameInput = asElement<HTMLInputElement>(this.root, '#editor-player-name-input');
     this.editorGridRoot = asElement<HTMLElement>(this.root, '#editor-grid');
     this.editorFeedback = asElement<HTMLElement>(this.root, '#editor-feedback');
+    this.editorAutoGenerateProgress = asElement<HTMLElement>(this.root, '#editor-auto-generate-progress');
     this.editorSelectedTile = asElement<HTMLElement>(this.root, '#editor-selected-tile');
     this.editorPaletteRoot = asElement<HTMLElement>(this.root, '#editor-palette');
     this.editorSaveButton = asElement<HTMLButtonElement>(this.root, '#btn-editor-save');
@@ -801,6 +808,7 @@ export class OverlayUI {
                 <button type="button" id="btn-editor-export">Download .txt</button>
               </div>
               <div class="editor-feedback" id="editor-feedback" aria-live="polite"></div>
+              <pre class="editor-auto-generate-progress" id="editor-auto-generate-progress" hidden aria-live="polite"></pre>
             </section>
           </aside>
 
@@ -1010,7 +1018,7 @@ export class OverlayUI {
     });
 
     this.editorAutoGenerateButton.addEventListener('click', () => {
-      this.autoGenerateEditorLevel();
+      void this.autoGenerateEditorLevel();
     });
 
     asElement<HTMLButtonElement>(this.root, '#btn-editor-export').addEventListener('click', () => {
@@ -1328,10 +1336,13 @@ export class OverlayUI {
   private refreshAdminEditorControls(snapshot: ControllerSnapshot): void {
     const isAdmin = this.isAdminUser();
     this.editorAutoGenerateButton.hidden = !isAdmin;
-    this.editorAutoGenerateButton.disabled = !isAdmin;
+    this.editorAutoGenerateButton.disabled = !isAdmin || this.adminAutoGenerateBusy;
     this.editorAutoGenerateButton.title = isAdmin
       ? 'Auto-generate a solvable level by seed, players, and difficulty.'
       : 'Admin-only feature.';
+    this.editorAutoGenerateButton.textContent = this.adminAutoGenerateBusy
+      ? 'Generating...'
+      : 'Auto Generate (Admin)';
 
     const runtimeTestLevelId = this.editorTestingPublishLevelId
       ? `${EDITOR_TEST_LEVEL_ID}-${this.editorTestingPublishLevelId}`
@@ -2478,6 +2489,22 @@ export class OverlayUI {
     this.editorFeedback.classList.toggle('editor-feedback-error', isError);
   }
 
+  private clearAutoGenerateProgress(): void {
+    this.autoGenerateProgressLog = [];
+    this.editorAutoGenerateProgress.textContent = '';
+    this.editorAutoGenerateProgress.hidden = true;
+  }
+
+  private appendAutoGenerateProgress(message: string): void {
+    const line = `${new Date().toLocaleTimeString([], { hour12: false })} ${message}`;
+    this.autoGenerateProgressLog.push(line);
+    if (this.autoGenerateProgressLog.length > 8) {
+      this.autoGenerateProgressLog = this.autoGenerateProgressLog.slice(this.autoGenerateProgressLog.length - 8);
+    }
+    this.editorAutoGenerateProgress.textContent = this.autoGenerateProgressLog.join('\n');
+    this.editorAutoGenerateProgress.hidden = false;
+  }
+
   private editorCellFromPointer(event: PointerEvent): HTMLElement | null {
     const hit = document.elementFromPoint(event.clientX, event.clientY);
     if (!hit) {
@@ -2511,6 +2538,7 @@ export class OverlayUI {
 
   private openEditorForCopiedLevel(level: ParsedLevel): void {
     this.stopSolverPlayback();
+    this.clearAutoGenerateProgress();
     const snapshot = this.controller.getSnapshot();
     const levelIndex = snapshot.levels.findIndex((entry) => entry.id === level.id);
     const sourceName = this.getDisplayLevelName(level, levelIndex >= 0 ? levelIndex : 0);
@@ -2530,6 +2558,7 @@ export class OverlayUI {
 
   private openEditorForBlankLevel(): void {
     this.stopSolverPlayback();
+    this.clearAutoGenerateProgress();
     this.editorGrid = this.createBlankGrid(25, 16);
     this.editorTestingPublishLevelId = null;
     this.editorLoadedLevelId = null;
@@ -2542,9 +2571,15 @@ export class OverlayUI {
     );
   }
 
-  private autoGenerateEditorLevel(): void {
+  private async autoGenerateEditorLevel(): Promise<void> {
     if (!this.isAdminUser()) {
+      this.clearAutoGenerateProgress();
       this.showEditorFeedback('Admin sign-in required to auto-generate levels.', true);
+      return;
+    }
+
+    if (this.adminAutoGenerateBusy) {
+      this.showEditorFeedback('Auto-generation already running. Please wait.');
       return;
     }
 
@@ -2570,18 +2605,45 @@ export class OverlayUI {
     const players = Number.parseInt(playersRaw, 10);
     const difficulty = Number.parseInt(difficultyRaw, 10);
     if (!Number.isInteger(players) || !Number.isInteger(difficulty)) {
+      this.clearAutoGenerateProgress();
       this.showEditorFeedback('Players and difficulty must be integers.', true);
       return;
     }
 
+    this.adminAutoGenerateBusy = true;
+    this.refreshAdminEditorControls(this.lastSnapshot ?? this.controller.getSnapshot());
+    this.clearAutoGenerateProgress();
+    this.showEditorFeedback('Auto-generation in progress...');
+
+    let lastLoggedAttempt = -1;
+    const logProgress = (progress: GenerateAdminLevelProgress): void => {
+      const shouldLog =
+        progress.stage === 'complete' ||
+        progress.attempt === 0 ||
+        progress.attempt === progress.maxAttempts ||
+        progress.attempt - lastLoggedAttempt >= 6;
+      if (!shouldLog) {
+        return;
+      }
+      lastLoggedAttempt = progress.attempt;
+      const seconds = (progress.elapsedMs / 1000).toFixed(1);
+      this.appendAutoGenerateProgress(
+        `[${progress.percent}%] ${progress.message} (${progress.attempt}/${progress.maxAttempts}, ${seconds}s)`,
+      );
+      this.statusText.textContent = progress.message;
+    };
+
     try {
-      const generated = generateAdminLevel({
+      const generated = await generateAdminLevelAsync({
         seed,
         players,
         difficulty,
         width,
         height,
         maxAttempts: 96,
+        yieldEveryAttempts: 2,
+        maxDurationMs: 30000,
+        onProgress: logProgress,
       });
 
       this.stopSolverPlayback();
@@ -2593,11 +2655,18 @@ export class OverlayUI {
       }
       this.refreshEditorAutoId();
       this.renderEditorGrid();
+      this.appendAutoGenerateProgress(
+        `Done. Generated candidate attempt ${generated.attempt + 1} in ${generated.minMoves} moves.`,
+      );
       this.showEditorFeedback(
         `Generated ${width}x${height} level (${players} player${players === 1 ? '' : 's'}) solved in ${generated.minMoves} moves.`,
       );
     } catch (error) {
+      this.appendAutoGenerateProgress(`Failed: ${formatError(error)}`);
       this.showEditorFeedback(`Auto-generate failed: ${formatError(error)}`, true);
+    } finally {
+      this.adminAutoGenerateBusy = false;
+      this.refreshAdminEditorControls(this.lastSnapshot ?? this.controller.getSnapshot());
     }
   }
 

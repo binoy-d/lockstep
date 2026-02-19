@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createInitialState, update } from '../../src/core';
 import { parseLevelText } from '../../src/core/levelParser';
 import type { Direction, ParsedLevel } from '../../src/core/types';
-import { generateAdminLevel, solveLevelForAdmin } from '../../src/editor/adminLevelTools';
+import { generateAdminLevel, generateAdminLevelAsync, solveLevelForAdmin } from '../../src/editor/adminLevelTools';
 
 function countTurns(path: string[]): number {
   if (path.length <= 1) {
@@ -147,6 +147,29 @@ describe('admin level tools', () => {
       expect(first.solverPath).toEqual(second.solverPath);
     },
   );
+
+  /**
+   * Verifies async generation emits progress updates and resolves with a playable level.
+   */
+  it('emits progress during async generation', { timeout: 20000 }, async () => {
+    const reports: Array<{ stage: string; attempt: number; maxAttempts: number }> = [];
+    const generated = await generateAdminLevelAsync({
+      seed: 'async-progress',
+      players: 1,
+      difficulty: 20,
+      width: 25,
+      height: 16,
+      maxAttempts: 16,
+      onProgress: (progress) => {
+        reports.push({ stage: progress.stage, attempt: progress.attempt, maxAttempts: progress.maxAttempts });
+      },
+    });
+
+    expect(reports.length).toBeGreaterThan(1);
+    expect(reports[0]?.stage).toBe('searching');
+    expect(reports[reports.length - 1]?.stage).toBe('complete');
+    expect(generated.minMoves).toBe(20);
+  });
 
   /**
    * Ensures generated levels are solved in exactly the requested minimum move count.
