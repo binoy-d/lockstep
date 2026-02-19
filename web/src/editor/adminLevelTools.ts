@@ -12,8 +12,18 @@ interface SeededRandom {
 interface FeasibilityResult {
   feasible: boolean;
   reason?: string;
-  minRowsPerLane: number;
-  maxRowsPerLane: number;
+  laneHeight: number;
+  maxDifficulty: number;
+}
+
+interface LaneSpec {
+  topY: number;
+  height: number;
+}
+
+interface LocalPoint {
+  x: number;
+  y: number;
 }
 
 export interface SolverOptions {
@@ -44,7 +54,7 @@ export interface GeneratedAdminLevel {
   difficulty: number;
   width: number;
   height: number;
-  rowsPerLane: number;
+  laneHeight: number;
   level: ParsedLevel;
   grid: string[][];
   levelText: string;
@@ -114,7 +124,7 @@ function normalizeInputs(options: GenerateAdminLevelOptions): Required<GenerateA
     difficulty: options.difficulty,
     width: options.width,
     height: options.height,
-    maxAttempts: options.maxAttempts ?? 64,
+    maxAttempts: options.maxAttempts ?? 96,
   };
 
   if (normalized.seed.length >= 32) {
@@ -125,8 +135,261 @@ function normalizeInputs(options: GenerateAdminLevelOptions): Required<GenerateA
   assertInteger(normalized.difficulty, 'difficulty', 1, 100);
   assertInteger(normalized.width, 'width', 7, 120);
   assertInteger(normalized.height, 'height', 7, 120);
-  assertInteger(normalized.maxAttempts, 'maxAttempts', 1, 1000);
+  assertInteger(normalized.maxAttempts, 'maxAttempts', 1, 2000);
   return normalized;
+}
+
+function cloneGrid(grid: string[][]): string[][] {
+  return grid.map((row) => row.slice());
+}
+
+function shuffleDirections(random: SeededRandom): Direction[] {
+  const directions = [...SOLVER_DIRECTIONS];
+  for (let index = directions.length - 1; index > 0; index -= 1) {
+    const swapIndex = random.int(0, index);
+    const next = directions[index];
+    directions[index] = directions[swapIndex];
+    directions[swapIndex] = next;
+  }
+  return directions;
+}
+
+function directionDelta(direction: Direction): { dx: number; dy: number } {
+  if (direction === 'up') {
+    return { dx: 0, dy: -1 };
+  }
+  if (direction === 'down') {
+    return { dx: 0, dy: 1 };
+  }
+  if (direction === 'left') {
+    return { dx: -1, dy: 0 };
+  }
+  return { dx: 1, dy: 0 };
+}
+
+function pointKey(point: LocalPoint): string {
+  return `${point.x},${point.y}`;
+}
+
+function countTurns(path: LocalPoint[]): number {
+  if (path.length <= 2) {
+    return 0;
+  }
+
+  let turns = 0;
+  let previousDx = path[1].x - path[0].x;
+  let previousDy = path[1].y - path[0].y;
+  for (let index = 2; index < path.length; index += 1) {
+    const dx = path[index].x - path[index - 1].x;
+    const dy = path[index].y - path[index - 1].y;
+    if (dx !== previousDx || dy !== previousDy) {
+      turns += 1;
+    }
+    previousDx = dx;
+    previousDy = dy;
+  }
+  return turns;
+}
+
+function within(point: LocalPoint, width: number, height: number): boolean {
+  return point.x >= 0 && point.x < width && point.y >= 0 && point.y < height;
+}
+
+function satisfiesClearance(candidate: LocalPoint, previous: LocalPoint | null, used: Set<string>): boolean {
+  const adjacent = [
+    { x: candidate.x + 1, y: candidate.y },
+    { x: candidate.x - 1, y: candidate.y },
+    { x: candidate.x, y: candidate.y + 1 },
+    { x: candidate.x, y: candidate.y - 1 },
+  ];
+
+  for (const neighbor of adjacent) {
+    const key = pointKey(neighbor);
+    if (!used.has(key)) {
+      continue;
+    }
+
+    if (previous && neighbor.x === previous.x && neighbor.y === previous.y) {
+      continue;
+    }
+
+    return false;
+  }
+
+  return true;
+}
+
+function findPathWithDifficulty(
+  width: number,
+  height: number,
+  difficulty: number,
+  random: SeededRandom,
+): LocalPoint[] | null {
+  const targetLength = difficulty + 1;
+  const maxWork = Math.max(15000, targetLength * 2000);
+
+  for (let startAttempt = 0; startAttempt < 48; startAttempt += 1) {
+    const start: LocalPoint = {
+      x: random.int(0, width - 1),
+      y: random.int(0, height - 1),
+    };
+
+    const path: LocalPoint[] = [start];
+    const used = new Set<string>([pointKey(start)]);
+    const branchStack: Direction[][] = [shuffleDirections(random)];
+    let work = 0;
+
+    while (path.length > 0) {
+      if (path.length === targetLength) {
+        return path.slice();
+      }
+
+      if (work > maxWork) {
+        break;
+      }
+
+      const current = path[path.length - 1];
+      const choices = branchStack[branchStack.length - 1];
+      if (choices.length === 0) {
+        const removed = path.pop();
+        branchStack.pop();
+        if (removed) {
+          used.delete(pointKey(removed));
+        }
+        continue;
+      }
+
+      const direction = choices.pop() as Direction;
+      const delta = directionDelta(direction);
+      const candidate = {
+        x: current.x + delta.dx,
+        y: current.y + delta.dy,
+      };
+      work += 1;
+
+      if (!within(candidate, width, height)) {
+        continue;
+      }
+
+      const key = pointKey(candidate);
+      if (used.has(key)) {
+        continue;
+      }
+
+      if (!satisfiesClearance(candidate, current, used)) {
+        continue;
+      }
+
+      path.push(candidate);
+      used.add(key);
+      branchStack.push(shuffleDirections(random));
+    }
+  }
+
+  return null;
+}
+
+function buildLanes(options: Required<GenerateAdminLevelOptions>, random: SeededRandom): LaneSpec[] {
+  const interiorHeight = options.height - 2;
+  const laneHeight = Math.floor((interiorHeight - (options.players - 1)) / options.players);
+  const usedRows = options.players * laneHeight + (options.players - 1);
+  const freeRows = interiorHeight - usedRows;
+  const topPadding = freeRows <= 0 ? 0 : random.int(0, freeRows);
+
+  const lanes: LaneSpec[] = [];
+  for (let index = 0; index < options.players; index += 1) {
+    lanes.push({
+      topY: 1 + topPadding + index * (laneHeight + 1),
+      height: laneHeight,
+    });
+  }
+
+  return lanes;
+}
+
+function feasibilityFor(options: Required<GenerateAdminLevelOptions>): FeasibilityResult {
+  const interiorHeight = options.height - 2;
+  const laneHeight = Math.floor((interiorHeight - (options.players - 1)) / options.players);
+  const laneWidth = options.width - 2;
+
+  if (laneHeight < 2 || laneWidth < 3) {
+    return {
+      feasible: false,
+      reason: `Map size ${options.width}x${options.height} is too small for ${options.players} synchronized lanes.`,
+      laneHeight,
+      maxDifficulty: 0,
+    };
+  }
+
+  const maxCellsWithSpacing = Math.floor((laneWidth * laneHeight + 1) / 2);
+  const maxDifficulty = Math.max(1, maxCellsWithSpacing - 1);
+  if (options.difficulty > maxDifficulty) {
+    return {
+      feasible: false,
+      reason: `Difficulty ${options.difficulty} exceeds this layout capacity (max ${maxDifficulty}) for ${options.players} players on ${options.width}x${options.height}.`,
+      laneHeight,
+      maxDifficulty,
+    };
+  }
+
+  return {
+    feasible: true,
+    laneHeight,
+    maxDifficulty,
+  };
+}
+
+function buildGridFromPath(
+  options: Required<GenerateAdminLevelOptions>,
+  random: SeededRandom,
+  lanes: LaneSpec[],
+  path: LocalPoint[],
+): string[][] {
+  const grid = Array.from({ length: options.height }, () => Array.from({ length: options.width }, () => '#'));
+  const lanePathKeys = new Set(path.map(pointKey));
+
+  for (const lane of lanes) {
+    for (let localY = 0; localY < lane.height; localY += 1) {
+      for (let localX = 0; localX < options.width - 2; localX += 1) {
+        const absoluteX = localX + 1;
+        const absoluteY = lane.topY + localY;
+        grid[absoluteY][absoluteX] = random.nextFloat() < 0.82 ? 'x' : '#';
+      }
+    }
+
+    for (const tile of path) {
+      const x = tile.x + 1;
+      const y = lane.topY + tile.y;
+      grid[y][x] = ' ';
+    }
+
+    for (const tile of path) {
+      const neighbors = [
+        { x: tile.x + 1, y: tile.y },
+        { x: tile.x - 1, y: tile.y },
+        { x: tile.x, y: tile.y + 1 },
+        { x: tile.x, y: tile.y - 1 },
+      ];
+      for (const neighbor of neighbors) {
+        if (neighbor.x < 0 || neighbor.x >= options.width - 2 || neighbor.y < 0 || neighbor.y >= lane.height) {
+          continue;
+        }
+
+        if (lanePathKeys.has(pointKey(neighbor))) {
+          continue;
+        }
+
+        grid[lane.topY + neighbor.y][neighbor.x + 1] = 'x';
+      }
+    }
+
+    const goal = path[0];
+    const spawn = path[path.length - 1];
+    grid[lane.topY + goal.y][goal.x + 1] = '!';
+    grid[lane.topY + spawn.y][spawn.x + 1] = 'P';
+  }
+
+  return grid;
 }
 
 function buildStateKey(state: GameState): string {
@@ -165,9 +428,10 @@ function reconstructPath(
 
 export function solveLevelForAdmin(level: ParsedLevel, options: SolverOptions = {}): SolverResult {
   const maxMoves =
-    typeof options.maxMoves === 'number' && Number.isInteger(options.maxMoves) ? options.maxMoves : 220;
+    typeof options.maxMoves === 'number' && Number.isInteger(options.maxMoves) ? options.maxMoves : 260;
   const maxVisited =
-    typeof options.maxVisited === 'number' && Number.isInteger(options.maxVisited) ? options.maxVisited : 400000;
+    typeof options.maxVisited === 'number' && Number.isInteger(options.maxVisited) ? options.maxVisited : 550000;
+
   const initialState = createInitialState([level], 0);
   const initialKey = buildStateKey(initialState);
   const queue: Array<{ key: string; state: GameState; depth: number }> = [
@@ -232,90 +496,14 @@ export function solveLevelForAdmin(level: ParsedLevel, options: SolverOptions = 
   };
 }
 
-function makeWallGrid(width: number, height: number): string[][] {
-  return Array.from({ length: height }, () => Array.from({ length: width }, () => '#'));
-}
-
-function buildLanePath(width: number, laneTopY: number, rows: number, leftToRightStart: boolean): Array<{ x: number; y: number }> {
-  const path: Array<{ x: number; y: number }> = [];
-  let leftToRight = leftToRightStart;
-
-  for (let row = 0; row < rows; row += 1) {
-    const y = laneTopY + row * 2;
-    if (leftToRight) {
-      for (let x = 1; x <= width - 2; x += 1) {
-        path.push({ x, y });
-      }
-    } else {
-      for (let x = width - 2; x >= 1; x -= 1) {
-        path.push({ x, y });
-      }
-    }
-
-    if (row < rows - 1) {
-      const connectorX = leftToRight ? width - 2 : 1;
-      path.push({ x: connectorX, y: y + 1 });
-    }
-    leftToRight = !leftToRight;
+function hasInterestingGeometry(path: LocalPoint[], difficulty: number, laneHeight: number): boolean {
+  if (difficulty < 10 || laneHeight < 3) {
+    return true;
   }
 
-  return path;
-}
-
-function feasibilityFor(options: Required<GenerateAdminLevelOptions>): FeasibilityResult {
-  const innerWidth = options.width - 2;
-  const innerHeight = options.height - 2;
-  const minRowsPerLane = Math.ceil((options.difficulty + 2) / (innerWidth + 1));
-  const maxLaneHeight = Math.floor((innerHeight - (options.players - 1)) / options.players);
-  const maxRowsPerLane = Math.floor((maxLaneHeight + 1) / 2);
-
-  if (maxRowsPerLane < minRowsPerLane) {
-    return {
-      feasible: false,
-      reason: `No layout can satisfy players=${options.players}, difficulty=${options.difficulty}, size=${options.width}x${options.height}.`,
-      minRowsPerLane,
-      maxRowsPerLane,
-    };
-  }
-
-  return {
-    feasible: true,
-    minRowsPerLane,
-    maxRowsPerLane,
-  };
-}
-
-function cloneGrid(grid: string[][]): string[][] {
-  return grid.map((row) => row.slice());
-}
-
-function buildCandidate(
-  options: Required<GenerateAdminLevelOptions>,
-  random: SeededRandom,
-  rowsPerLane: number,
-): string[][] {
-  const grid = makeWallGrid(options.width, options.height);
-  const laneHeight = rowsPerLane * 2 - 1;
-  const innerHeight = options.height - 2;
-  const usedRows = options.players * laneHeight + (options.players - 1);
-  const freeRows = innerHeight - usedRows;
-  const topPadding = freeRows === 0 ? 0 : random.int(0, freeRows);
-  const leftToRightStart = random.bool();
-
-  for (let lane = 0; lane < options.players; lane += 1) {
-    const laneTopY = 1 + topPadding + lane * (laneHeight + 1);
-    const path = buildLanePath(options.width, laneTopY, rowsPerLane, leftToRightStart);
-    for (const tile of path) {
-      grid[tile.y][tile.x] = ' ';
-    }
-
-    const goal = path[0];
-    const spawn = path[options.difficulty];
-    grid[goal.y][goal.x] = '!';
-    grid[spawn.y][spawn.x] = 'P';
-  }
-
-  return grid;
+  const turns = countTurns(path);
+  const minTurns = Math.max(2, Math.floor(difficulty / 7));
+  return turns >= minTurns;
 }
 
 export function generateAdminLevel(options: GenerateAdminLevelOptions): GeneratedAdminLevel {
@@ -325,12 +513,24 @@ export function generateAdminLevel(options: GenerateAdminLevelOptions): Generate
     throw new Error(feasibility.reason);
   }
 
+  const laneWidth = normalized.width - 2;
+
   for (let attempt = 0; attempt < normalized.maxAttempts; attempt += 1) {
     const random = createSeededRandom(`${normalized.seed}|attempt:${attempt}`);
-    const rowsPerLane = random.int(feasibility.minRowsPerLane, feasibility.maxRowsPerLane);
-    const grid = buildCandidate(normalized, random, rowsPerLane);
+    const lanes = buildLanes(normalized, random);
+    const localPath = findPathWithDifficulty(laneWidth, feasibility.laneHeight, normalized.difficulty, random);
+    if (!localPath) {
+      continue;
+    }
+
+    if (!hasInterestingGeometry(localPath, normalized.difficulty, feasibility.laneHeight)) {
+      continue;
+    }
+
+    const grid = buildGridFromPath(normalized, random, lanes, localPath);
     const levelText = grid.map((row) => row.join('')).join('\n');
     const parsed = parseLevelText(`admin-generated-${attempt}`, levelText, `Generated ${normalized.seed}`);
+
     if (parsed.playerSpawns.length !== normalized.players) {
       continue;
     }
@@ -339,6 +539,7 @@ export function generateAdminLevel(options: GenerateAdminLevelOptions): Generate
       maxMoves: normalized.difficulty,
       maxVisited: 800000,
     });
+
     if (!solved.path || solved.minMoves !== normalized.difficulty) {
       continue;
     }
@@ -350,7 +551,7 @@ export function generateAdminLevel(options: GenerateAdminLevelOptions): Generate
       difficulty: normalized.difficulty,
       width: normalized.width,
       height: normalized.height,
-      rowsPerLane,
+      laneHeight: feasibility.laneHeight,
       level: parsed,
       grid: cloneGrid(grid),
       levelText,
@@ -361,6 +562,6 @@ export function generateAdminLevel(options: GenerateAdminLevelOptions): Generate
   }
 
   throw new Error(
-    `Unable to generate a solvable level after ${normalized.maxAttempts} attempts for difficulty ${normalized.difficulty}.`,
+    `Unable to generate a smart solvable level after ${normalized.maxAttempts} attempts for difficulty ${normalized.difficulty}.`,
   );
 }

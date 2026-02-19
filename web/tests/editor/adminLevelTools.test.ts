@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { parseLevelText } from '../../src/core/levelParser';
 import { generateAdminLevel, solveLevelForAdmin } from '../../src/editor/adminLevelTools';
 
+function countTurns(path: string[]): number {
+  if (path.length <= 1) {
+    return 0;
+  }
+
+  let turns = 0;
+  let previous = path[0];
+  for (let index = 1; index < path.length; index += 1) {
+    if (path[index] !== previous) {
+      turns += 1;
+    }
+    previous = path[index];
+  }
+  return turns;
+}
+
 describe('admin level tools', () => {
   /**
    * Verifies deterministic generation with the same seed and constraints.
@@ -31,14 +47,14 @@ describe('admin level tools', () => {
     const generated = generateAdminLevel({
       seed: 'difficulty-match',
       players: 1,
-      difficulty: 38,
+      difficulty: 64,
       width: 25,
       height: 16,
       maxAttempts: 64,
     });
 
-    expect(generated.minMoves).toBe(38);
-    expect(generated.solverPath).toHaveLength(38);
+    expect(generated.minMoves).toBe(64);
+    expect(generated.solverPath).toHaveLength(64);
   });
 
   /**
@@ -49,11 +65,30 @@ describe('admin level tools', () => {
       generateAdminLevel({
         seed: 'impossible',
         players: 4,
-        difficulty: 80,
+        difficulty: 30,
         width: 25,
         height: 16,
       }),
-    ).toThrow(/No layout can satisfy players=4, difficulty=80, size=25x16/i);
+    ).toThrow(/Difficulty 30 exceeds this layout capacity/i);
+  });
+
+  /**
+   * Ensures generated maps include lava pressure and directional turns (not just straight corridors).
+   */
+  it('builds non-trivial geometry with lava constraints', () => {
+    const generated = generateAdminLevel({
+      seed: 'geometry-check',
+      players: 1,
+      difficulty: 42,
+      width: 25,
+      height: 16,
+      maxAttempts: 96,
+    });
+
+    const lavaCount = generated.levelText.split('').filter((tile) => tile === 'x').length;
+    const turnCount = countTurns(generated.solverPath);
+    expect(lavaCount).toBeGreaterThan(20);
+    expect(turnCount).toBeGreaterThan(3);
   });
 
   /**
